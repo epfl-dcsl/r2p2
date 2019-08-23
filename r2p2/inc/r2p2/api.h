@@ -32,6 +32,7 @@ typedef void (*success_cb_f)(long handle, void *arg, struct iovec *iov,
 typedef void (*error_cb_f)(void *arg, int err);
 typedef void (*timeout_cb_f)(void *arg);
 typedef void (*recv_fn)(long handle, struct iovec *iov, int iovcnt);
+typedef int (*app_flow_control)(void);
 
 struct r2p2_host_tuple {
 	uint32_t ip;
@@ -40,7 +41,12 @@ struct r2p2_host_tuple {
 
 enum {
 	LB_ROUTE = 0,
-	FIXED_ROUTE = 1,
+	FIXED_ROUTE,
+};
+
+enum {
+	ERR_NO_SOCKET=1,
+	ERR_DROP_MSG,
 };
 
 struct r2p2_ctx {
@@ -69,6 +75,7 @@ void r2p2_poll(void);
  * Implementation agnostic
  */
 void r2p2_set_recv_cb(recv_fn fn);
+void r2p2_set_app_flow_control_fn(app_flow_control fn);
 void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx);
 void r2p2_send_response(long handle, struct iovec *iov, int iovcnt);
 void r2p2_recv_resp_done(long handle);

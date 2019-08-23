@@ -202,18 +202,6 @@ static struct r2p2_socket *get_socket(void)
 	return res;
 }
 
-static void free_socket(struct r2p2_socket *s)
-{
-	s->taken = 0;
-	s->cp = NULL;
-	sp.count--;
-}
-
-static void linux_on_client_pair_free(void *data)
-{
-	free_socket((struct r2p2_socket *)data);
-}
-
 static int __disarm_timer(int timerfd)
 {
 	struct itimerspec ts = {0};
@@ -225,12 +213,26 @@ static int __disarm_timer(int timerfd)
 	return 0;
 }
 
+static void free_socket(struct r2p2_socket *s)
+{
+	s->taken = 0;
+	s->cp = NULL;
+	sp.count--;
+}
+
+static void linux_on_client_pair_free(void *data)
+{
+	struct r2p2_socket *sock = (struct r2p2_socket *)data;
+	__disarm_timer(sock->tfd);
+	free_socket(sock);
+}
+
 static void handle_timer_for_socket(struct r2p2_socket *s)
 {
 	// Disable timer
 	__disarm_timer(s->tfd);
-	if (s->taken)
-		timer_triggered(s->cp);
+	assert(s->taken);
+	timer_triggered(s->cp);
 }
 
 /*
@@ -418,7 +420,7 @@ int prepare_to_send(struct r2p2_client_pair *cp)
 
 	s = get_socket();
 	if (!s) {
-		cp->ctx->error_cb(cp->ctx->arg, 0);
+		cp->ctx->error_cb(cp->ctx->arg, -ERR_NO_SOCKET);
 		return -1;
 	}
 	s->cp = cp;

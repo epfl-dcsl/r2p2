@@ -41,6 +41,7 @@ static_assert(LINUX, "Timestamping supported only in Linux");
 #define min(a, b) ((a) < (b)) ? (a) : (b)
 
 static recv_fn rfn;
+static app_flow_control afc_fn = NULL;
 
 static __thread struct fixed_mempool *client_pairs;
 static __thread struct fixed_mempool *server_pairs;
@@ -202,6 +203,14 @@ static int prepare_to_app_iovec(struct r2p2_msg *msg)
 	return iovcnt;
 }
 
+static void handle_drop_msg(struct r2p2_client_pair *cp)
+{
+	cp->ctx->error_cb(cp->ctx->arg, -ERR_DROP_MSG);
+
+	remove_from_pending_client_pairs(cp);
+	free_client_pair(cp);
+}
+
 static void forward_request(struct r2p2_server_pair *sp)
 {
 	int iovcnt;
@@ -306,6 +315,31 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	msg->req_id = req_id;
 }
 
+static int should_keep_req(__attribute__((unused))struct r2p2_server_pair *sp)
+{
+	if (afc_fn)
+		return afc_fn();
+	else
+		return 1;
+}
+
+static void send_drop_msg(struct r2p2_server_pair *sp)
+{
+	char drop_payload[] = "DROP";
+	struct iovec ack;
+	struct r2p2_msg drop_msg = {0};
+
+	ack.iov_base = drop_payload;
+	ack.iov_len = 4;
+	r2p2_prepare_msg(&drop_msg, &ack, 1, DROP_MSG, FIXED_ROUTE,
+			sp->request.req_id);
+	buf_list_send(drop_msg.head_buffer, &sp->request.sender, NULL);
+#ifdef LINUX
+	free_buffer(drop_msg.head_buffer);
+#endif
+
+}
+
 static void handle_response(generic_buffer gb, int len,
 							struct r2p2_header *r2p2h,
 							struct r2p2_host_tuple *source,
@@ -322,7 +356,7 @@ static void handle_response(generic_buffer gb, int len,
 
 	cp = find_in_pending_client_pairs(r2p2h->rid, local_host);
 	if (!cp) {
-		// printf("Expired timer?\n");
+		printf("No client pair found. RID = %d ORDER = %d\n", r2p2h->rid, r2p2h->p_order);
 		free_buffer(gb);
 		return;
 	}
@@ -336,62 +370,79 @@ static void handle_response(generic_buffer gb, int len,
 #endif
 
 	cp->reply.sender = *source;
-	if (cp->state == R2P2_W_RESPONSE) {
-		set_buffer_payload_size(gb, len);
-		r2p2_msg_add_payload(&cp->reply, gb);
 
-		if (is_first(r2p2h)) {
-			cp->reply_expected_packets = r2p2h->p_order;
-			cp->reply_received_packets = 1;
-		} else {
-			if (r2p2h->p_order != cp->reply_received_packets++) {
-				printf("OOF in response\n");
+	switch(get_msg_type(r2p2h)) {
+		case RESPONSE_MSG:
+			assert(cp->state == R2P2_W_RESPONSE);
+			set_buffer_payload_size(gb, len);
+			r2p2_msg_add_payload(&cp->reply, gb);
+
+			if (is_first(r2p2h)) {
+				cp->reply_expected_packets = r2p2h->p_order;
+				cp->reply_received_packets = 1;
+
+			} else {
+				if (r2p2h->p_order != cp->reply_received_packets++) {
+					printf("OOF in response\n");
+					cp->ctx->error_cb(cp->ctx->arg, -1);
+					remove_from_pending_client_pairs(cp);
+					free_client_pair(cp);
+					return;
+
+				}
+			}
+
+			// Is it full msg? Should I call the application?
+			if (!is_last(r2p2h))
+				return;
+
+			if (cp->reply_received_packets != cp->reply_expected_packets) {
+				printf("Wrong total size in response\n");
 				cp->ctx->error_cb(cp->ctx->arg, -1);
 				remove_from_pending_client_pairs(cp);
 				free_client_pair(cp);
 				return;
-			}
-		}
 
-		// Is it full msg? Should I call the application?
-		if (!is_last(r2p2h)) {
-			return;
-		}
-		if (cp->timer)
-			disarm_timer(cp->timer);
-		if (cp->reply_received_packets != cp->reply_expected_packets) {
-			printf("Wrong total size in response\n");
-			cp->ctx->error_cb(cp->ctx->arg, -1);
-			remove_from_pending_client_pairs(cp);
-			free_client_pair(cp);
-			return;
-		}
-		iovcnt = prepare_to_app_iovec(&cp->reply);
+			}
+			if (cp->timer)
+				disarm_timer(cp->timer);
+			iovcnt = prepare_to_app_iovec(&cp->reply);
 
 #ifdef WITH_TIMESTAMPING
-		// Extract tx timestamp if it wasn't there (due to packet order)
-		if (cp->ctx->rx_timestamp.tv_sec != 0 &&
-			cp->ctx->tx_timestamp.tv_sec == 0) {
-			extract_tx_timestamp(((struct r2p2_socket *)cp->impl_data)->fd,
-								 &cp->ctx->tx_timestamp);
-		}
+			// Extract tx timestamp if it wasn't there (due to packet order)
+			if (cp->ctx->rx_timestamp.tv_sec != 0 &&
+					cp->ctx->tx_timestamp.tv_sec == 0) {
+				extract_tx_timestamp(((struct r2p2_socket *)cp->impl_data)->fd,
+						&cp->ctx->tx_timestamp);
+
+			}
 #endif
 
-		cp->ctx->success_cb((long)cp, cp->ctx->arg, to_app_iovec, iovcnt);
-	} else {
-		// Send the rest packets
-		assert(cp->state == R2P2_W_ACK);
-		assert(len == (sizeof(struct r2p2_header) + 3));
-		free_buffer(gb);
-
+			cp->ctx->success_cb((long)cp, cp->ctx->arg, to_app_iovec, iovcnt);
+			break;
+		case ACK_MSG:
+			// Send the rest packets
+			assert(cp->state == R2P2_W_ACK);
+			if (len != (sizeof(struct r2p2_header) + 3))
+				printf("ACK msg size is %d\n", len);
+			assert(len == (sizeof(struct r2p2_header) + 3));
+			free_buffer(gb);
 #ifdef LINUX
-		rest_to_send = get_buffer_next(cp->request.head_buffer);
+			rest_to_send = get_buffer_next(cp->request.head_buffer);
 #else
-		rest_to_send = cp->request.head_buffer;
+			rest_to_send = cp->request.head_buffer;
 #endif
-		buf_list_send(rest_to_send, &cp->reply.sender, cp->impl_data);
-
-		cp->state = R2P2_W_RESPONSE;
+			buf_list_send(rest_to_send, &cp->reply.sender, cp->impl_data);
+			cp->state = R2P2_W_RESPONSE;
+			break;
+		case DROP_MSG:
+			handle_drop_msg(cp);
+			free_buffer(gb);
+			break;
+		default:
+			fprintf(stderr, "Unknown msg type %d for response\n",
+					get_msg_type(r2p2h));
+			assert(0);
 	}
 }
 
@@ -419,6 +470,15 @@ static void handle_request(generic_buffer gb, int len,
 		sp->request.req_id = req_id;
 		sp->request_expected_packets = r2p2h->p_order;
 		sp->request_received_packets = 1;
+
+		if (!should_keep_req(sp)) {
+			set_buffer_payload_size(gb, len);
+			r2p2_msg_add_payload(&sp->request, gb);
+			send_drop_msg(sp);
+			free_server_pair(sp);
+			return;
+		}
+
 		if (!is_last(r2p2h)) {
 			// add to pending request
 			add_to_pending_server_pairs(sp);
@@ -440,6 +500,7 @@ static void handle_request(generic_buffer gb, int len,
 			printf("OOF in request\n");
 			remove_from_pending_server_pairs(sp);
 			free_server_pair(sp);
+			free_buffer(gb);
 			return;
 		}
 	}
@@ -509,6 +570,8 @@ void timer_triggered(struct r2p2_client_pair *cp)
 
 	assert(cp->ctx->timeout_cb);
 	cp->ctx->timeout_cb(cp->ctx->arg);
+	//printf("Timer triggered: received packets %d expected %d\n",
+	//		cp->reply_received_packets, cp->reply_expected_packets);
 
 	remove_from_pending_client_pairs(cp);
 	free_client_pair(cp);
@@ -579,4 +642,9 @@ void r2p2_recv_resp_done(long handle)
 void r2p2_set_recv_cb(recv_fn fn)
 {
 	rfn = fn;
+}
+
+void r2p2_set_app_flow_control_fn(app_flow_control fn)
+{
+	afc_fn = fn;
 }

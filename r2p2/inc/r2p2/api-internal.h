@@ -40,9 +40,10 @@
 
 enum {
 	REQUEST_MSG = 0,
-	RESPONSE_MSG = 1,
-	CONTROL_MSG = 2,
-	ACK_MSG = 3,
+	RESPONSE_MSG,
+	CONTROL_MSG,
+	ACK_MSG,
+	DROP_MSG,
 };
 
 typedef void *generic_buffer;
@@ -88,7 +89,9 @@ struct r2p2_server_pair {
 
 static inline int is_response(struct r2p2_header *h)
 {
-	return (h->type_policy & 0xF0) & (RESPONSE_MSG << 4);
+	return ((h->type_policy & 0xF0) == (RESPONSE_MSG << 4)) ||
+		((h->type_policy & 0xF0) == (ACK_MSG << 4)) ||
+		((h->type_policy & 0xF0) == (DROP_MSG << 4));
 }
 
 static inline int is_first(struct r2p2_header *h)
@@ -99,6 +102,11 @@ static inline int is_first(struct r2p2_header *h)
 static inline int is_last(struct r2p2_header *h)
 {
 	return h->flags & L_FLAG;
+}
+
+static inline uint8_t get_msg_type(struct r2p2_header *h)
+{
+	return (h->type_policy & 0xF0) >> 4;
 }
 
 /*
