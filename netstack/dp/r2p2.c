@@ -39,10 +39,11 @@
 
 #define TIMER_POOL_SIZE 4096
 
+static uint32_t router_ip;
 static __thread uint16_t local_port;
 static __thread struct r2p2_host_tuple local_host;
-static uint32_t router_ip;
 static __thread struct fixed_mempool *client_req_timers;
+static __thread uint32_t loop_count;
 
 static void dpdk_on_client_pair_free(void *data)
 {
@@ -170,6 +171,8 @@ int r2p2_init_per_core(int queue_id, __attribute__((unused)) int core_count)
 void r2p2_poll(void)
 {
 	net_poll();
+	if (loop_count++ % 1024 == 0)
+		rte_timer_manage();
 }
 
 /*
