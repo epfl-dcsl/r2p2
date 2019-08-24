@@ -181,8 +181,11 @@ int dpdk_eth_send(struct rte_mbuf *pkt_buf, uint16_t len)
 	pkt_buf->data_len = len;
 
 #ifdef NO_BATCH
-	ret = rte_eth_tx_burst(0, RTE_PER_LCORE(queue_id), &pkt_buf, 1);
-	assert(ret == 1);
+	while (1) {
+		ret = rte_eth_tx_burst(0, RTE_PER_LCORE(queue_id), &pkt_buf, 1);
+		if (ret == 1)
+			break;
+	}
 #else
 	ret = rte_eth_tx_buffer(0, RTE_PER_LCORE(queue_id), RTE_PER_LCORE(tx_buf),
 							pkt_buf);
