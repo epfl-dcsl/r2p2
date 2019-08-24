@@ -236,7 +236,7 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 					  uint8_t req_type, uint8_t policy, uint16_t req_id)
 {
 	unsigned int iov_idx, bufferleft, copied, tocopy, buffer_cnt, total_payload,
-		single_packet_msg, is_first;
+		single_packet_msg, is_first, should_small_first;
 	struct r2p2_header *r2p2h;
 	generic_buffer gb, new_gb;
 	char *target, *src;
@@ -251,6 +251,10 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	else
 		single_packet_msg = 0;
 
+	if (!single_packet_msg && (req_type == REQUEST_MSG))
+		should_small_first = 1;
+	else should_small_first = 0;
+
 	iov_idx = 0;
 	bufferleft = 0;
 	copied = 0;
@@ -259,11 +263,9 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	is_first = 1;
 	while (iov_idx < (unsigned int)iovcnt) {
 		if (!bufferleft) {
-			new_gb = get_buffer();
-			assert(new_gb);
 			// Set the last buffer to full size
 			if (gb) {
-				if (is_first) {
+				if (is_first && should_small_first) {
 					set_buffer_payload_size(gb, MIN_PAYLOAD_SIZE +
 													sizeof(struct r2p2_header));
 					is_first = 0;
@@ -271,10 +273,12 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 					set_buffer_payload_size(gb, PAYLOAD_SIZE +
 													sizeof(struct r2p2_header));
 			}
+			new_gb = get_buffer();
+			assert(new_gb);
 			r2p2_msg_add_payload(msg, new_gb);
 			gb = new_gb;
 			target = get_buffer_payload(gb);
-			if (is_first && !single_packet_msg)
+			if (is_first && should_small_first)
 				bufferleft = MIN_PAYLOAD_SIZE;
 			else
 				bufferleft = PAYLOAD_SIZE;
