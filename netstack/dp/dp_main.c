@@ -35,6 +35,9 @@
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
+#ifdef ENABLE_PCAP
+#include <rte_pdump.h>
+#endif
 
 #include <dp/api.h>
 #include <dp/core.h>
@@ -49,6 +52,9 @@ static void signal_handler(int signum)
 	if (signum == SIGINT || signum == SIGTERM) {
 		printf("\n\nSignal %d received, preparing to exit...\n", signum);
 		force_quit = true;
+#ifdef ENABLE_PCAP
+		rte_pdump_uninit();
+#endif
 	}
 }
 
@@ -65,6 +71,10 @@ int main(int argc, char **argv)
 	/*initialise dpdk*/
 	dpdk_init(&argc, &argv);
 	/*parse any other input args*/
+
+#ifdef ENABLE_PCAP
+	rte_pdump_init(NULL);
+#endif
 
 	/*initialise network*/
 	if (net_init()) {
