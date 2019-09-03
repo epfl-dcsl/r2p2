@@ -116,6 +116,9 @@ void dpdk_init(int *argc, char ***argv)
 					 ret, (unsigned)port_id);
 		}
 
+		/* enable multicast */
+		rte_eth_allmulticast_enable(port_id);
+
 		/* initialize one queue per cpu */
 		for (i = 0; i < rte_lcore_count(); i++) {
 			printf("setting up TX and RX queues...\n");

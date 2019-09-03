@@ -23,6 +23,7 @@
  */
 
 #include <arpa/inet.h>
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -103,6 +104,47 @@ static int parse_arp(void)
 	}
 	return 0;
 }
+
+static int parse_multicast(void)
+{
+	const config_setting_t *multicast = NULL;
+	int i, j;
+	const char *ip_str;
+	struct in_addr mcast_ip;
+	char mac[64], *ptr;
+	char tmp[64];
+	uint8_t mac_parts[3];
+
+
+	multicast = config_lookup(&cfg, "multicast");
+	if (!multicast) {
+		fprintf(stderr, "no multicast entries defined in config\n");
+		return -1;
+	}
+
+	for (i = 0; i < config_setting_length(multicast); ++i) {
+		ip_str = config_setting_get_string_elem (multicast,i);
+		printf("Multicast IP: %s\n", ip_str);
+		inet_pton(AF_INET, ip_str, &mcast_ip);
+		CFG.multicast_ips[CFG.multicast_cnt++] = be32toh(mcast_ip.s_addr);
+		strcpy(tmp, ip_str);
+		ptr = strtok(tmp, ".");
+		ptr = strtok(NULL, "."); // discard the first
+		for (j=0;j<3;j++) {
+			if (j==0)
+				mac_parts[j] = 0x7F & atoi(ptr);
+			else
+				mac_parts[j] = atoi(ptr);
+		}
+		sprintf(mac, "01:00:5E:%02x:%02x:%02x", mac_parts[0], mac_parts[1],
+				mac_parts[2]);
+		add_arp_entry(ip_str, mac);
+		assert(CFG.multicast_cnt <= MAX_MULTICAST_IPS);
+	}
+	return 0;
+
+}
+
 #endif
 
 int parse_config(void)
@@ -161,6 +203,8 @@ int parse_config(void)
 		config_destroy(&cfg);
 		return ret;
 	}
+
+	parse_multicast();
 #endif
 
 	return 0;

@@ -34,13 +34,23 @@
 #include <net/net.h>
 #include <net/utils.h>
 
+static inline int ip_is_multicast(uint32_t ip)
+{
+	uint32_t first_oct;
+
+	first_oct = ip & 0xFF;
+	return  (first_oct >= 224) && (first_oct <= 239);
+}
+
 void ip_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph)
 {
 	struct icmp_hdr *icmph;
 	struct udp_hdr *udph;
+	struct igmpv2_hdr *igmph;
 	int hdrlen;
 
-	if (iph->dst_addr != rte_cpu_to_be_32(get_local_ip()))
+	if ((iph->dst_addr != rte_cpu_to_be_32(get_local_ip()))
+			&& !ip_is_multicast(iph->dst_addr))
 		goto out;
 
 	/* perform necessary checks */
@@ -62,6 +72,10 @@ void ip_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph)
 		icmph = (struct icmp_hdr *)((unsigned char *)iph + hdrlen);
 		icmp_in(pkt_buf, iph, icmph);
 		break;
+	case IPPROTO_IGMP:
+		igmph = (struct igmpv2_hdr *)((unsigned char *)iph + hdrlen);
+		igmp_in(pkt_buf, iph, igmph);
+		break;
 	default:
 		goto out;
 	}
@@ -77,13 +91,18 @@ void ip_out(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph, uint32_t src_ip,
 			uint32_t dst_ip, uint8_t ttl, uint8_t tos, uint8_t proto,
 			uint16_t l4len, struct ether_addr *dst_haddr)
 {
-	int sent;
+	int sent, hdrlen;
+	char *options;
+
+	hdrlen = sizeof(struct ipv4_hdr);
+	if (proto == IPPROTO_IGMP)
+		hdrlen += 4; // 4 bytes for options
 
 	/* setup ip hdr */
 	iph->version_ihl =
-		(4 << 4) | (sizeof(struct ipv4_hdr) / IPV4_IHL_MULTIPLIER);
+		(4 << 4) | (hdrlen / IPV4_IHL_MULTIPLIER);
 	iph->type_of_service = tos;
-	iph->total_length = rte_cpu_to_be_16(sizeof(struct ipv4_hdr) + l4len);
+	iph->total_length = rte_cpu_to_be_16(hdrlen + l4len);
 	iph->packet_id = 0;
 	iph->fragment_offset = rte_cpu_to_be_16(0x4000); // Don't fragment
 	iph->time_to_live = ttl;
@@ -101,12 +120,26 @@ void ip_out(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph, uint32_t src_ip,
 	}
 	assert(dst_haddr != NULL);
 
+	/* Add options if IGMP */
+	if (proto == IPPROTO_IGMP) {
+		options = (char *)(iph+1);
+		*options = 0x94;
+		options++;
+		*options = 0x4;
+		options++;
+		*options = 0x0;
+		options++;
+		*options = 0x0;
+	}
+
 	///* compute checksum */
-	iph->hdr_checksum = rte_ipv4_cksum(iph);
+	iph->hdr_checksum = rte_raw_cksum(iph, hdrlen);
+	iph->hdr_checksum = (iph->hdr_checksum == 0xffff) ? iph->hdr_checksum : (uint16_t)~(iph->hdr_checksum);
 
 	if (proto == IPPROTO_TCP) {
 		assert(0);
 	}
+
 	sent = eth_out(pkt_buf, ETHER_TYPE_IPv4, dst_haddr,
 				   rte_be_to_cpu_16(iph->total_length));
 	assert(sent == 1);

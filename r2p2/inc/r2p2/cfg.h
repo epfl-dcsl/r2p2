@@ -28,12 +28,16 @@
 #include <rte_config.h>
 #endif
 
+#define MAX_MULTICAST_IPS 64
+
 struct cfg_parameters {
 	uint32_t host_addr;
 	uint16_t host_port;
 	uint32_t router_addr;
 	uint16_t router_port;
 	char if_name[64];
+	uint32_t multicast_ips[MAX_MULTICAST_IPS];
+	uint8_t multicast_cnt;
 };
 
 struct cfg_parameters CFG;
