@@ -231,8 +231,8 @@ static void handle_timer_for_socket(struct r2p2_socket *s)
 {
 	// Disable timer
 	__disarm_timer(s->tfd);
-	assert(s->taken);
-	timer_triggered(s->cp);
+	if (s->taken)
+		timer_triggered(s->cp);
 }
 
 /*
