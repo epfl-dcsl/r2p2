@@ -41,20 +41,26 @@
 enum {
 	REQUEST_MSG = 0,
 	RESPONSE_MSG,
-	CONTROL_MSG,
+	FEEDBACK_MSG,
 	ACK_MSG,
 	DROP_MSG,
 };
 
 typedef void *generic_buffer;
 
-struct r2p2_header {
+struct __attribute__((__packed__)) r2p2_header {
 	uint8_t magic;
 	uint8_t header_size;
 	uint8_t type_policy; // 4 bytes message type 4 bytes policy
 	uint8_t flags;
 	uint16_t rid;
 	uint16_t p_order;
+};
+
+struct __attribute__((__packed__)) r2p2_feedback {
+	uint16_t rid;
+	uint16_t port;
+	uint32_t ip;
 };
 
 struct r2p2_msg {
@@ -152,4 +158,20 @@ int prepare_to_send(struct r2p2_client_pair *cp);
 int buf_list_send(generic_buffer first_buf, struct r2p2_host_tuple *dest,
 				  void *socket_info);
 int disarm_timer(void *timer);
-void router_notify(void);
+void router_notify(uint32_t ip, uint16_t port, uint16_t rid);
+static inline void r2p2_prepare_feedback(char *dest, uint32_t ip,
+		uint16_t port, uint16_t rid)
+{
+	struct r2p2_header *r2p2h;
+	struct r2p2_feedback *r2p2f;
+
+	r2p2h = (struct r2p2_header *)dest;
+	r2p2f = (struct r2p2_feedback *)(r2p2h+1);
+
+	r2p2h->magic = MAGIC;
+	r2p2h->type_policy = (FEEDBACK_MSG << 4);
+
+	r2p2f->rid = rid;
+	r2p2f->ip = ip;
+	r2p2f->port = port;
+}

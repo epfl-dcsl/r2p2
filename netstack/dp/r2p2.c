@@ -196,7 +196,7 @@ generic_buffer get_buffer(void)
 	return (generic_buffer)entry;
 }
 
-generic_buffer get_buffer_payload(generic_buffer gb)
+void *get_buffer_payload(generic_buffer gb)
 {
 	struct net_sge *entry = (struct net_sge *)gb;
 	return entry->payload;
@@ -302,7 +302,8 @@ void router_notify(void)
 	id.dst_port = CFG.router_port;
 
 	entry = alloc_net_sge();
-	entry->len = 0;
+	entry->len = sizeof(struct r2p2_header) + sizeof(struct r2p2_feedback);
+	r2p2_prepare_feedback(entry->payload, ip, port, rid);
 	udp_send(entry, &id);
 #endif
 }

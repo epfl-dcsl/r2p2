@@ -480,13 +480,18 @@ int disarm_timer(void *timer)
 	return __disarm_timer(tfd);
 }
 
-void router_notify(void)
+void router_notify(uint32_t ip, uint16_t port, uint16_t rid)
 {
 #ifdef WITH_ROUTER
 	int ret;
+	char buf[64];
+
+	r2p2_prepare_feedback(buf, ip, port, rid);
 	socklen_t len = sizeof(struct sockaddr_in);
 
-	ret = sendto(sock.fd, NULL, 0, 0, (struct sockaddr *)&router_addr, len);
-	assert(ret == 0);
+	ret = sendto(sock.fd, buf,
+			sizeof(struct r2p2_header) + sizeof(struct r2p2_feedback), 0,
+			(struct sockaddr *)&router_addr, len);
+	assert(ret == sizeof(struct r2p2_header) + sizeof(struct r2p2_feedback));
 #endif
 }

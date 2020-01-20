@@ -594,7 +594,8 @@ void r2p2_send_response(long handle, struct iovec *iov, int iovcnt)
 	buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
 	// Notify router
-	router_notify();
+	router_notify(sp->request.sender.ip, sp->request.sender.port,
+			sp->request.req_id);
 
 	remove_from_pending_server_pairs(sp);
 	free_server_pair(sp);
