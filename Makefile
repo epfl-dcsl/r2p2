@@ -22,14 +22,10 @@
 
 all:
 	make dpdk-apps
-	make lucene
 	make linux-apps
 
 dpdk-apps:
 	make -C dpdk-apps
-
-lucene:
-	make -C linux-apps/lucene-r2p2
 
 linux-apps:
 	make -C linux-apps
@@ -38,7 +34,6 @@ clean:
 	make -C r2p2 clean
 	make -C dpdk-apps cleanstate
 	make -C linux-apps/ clean
-	make -C linux-apps/lucene-r2p2 clean
 
 style:
 	find r2p2 -name "*.c" | xargs clang-format -i -style=file
