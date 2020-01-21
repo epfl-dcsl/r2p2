@@ -290,7 +290,7 @@ int disarm_timer(void *timer)
 	return 0;
 }
 
-void router_notify(void)
+void router_notify(uint32_t ip, uint16_t port, uint16_t rid)
 {
 #ifdef FDIR
 	struct ip_tuple id;
