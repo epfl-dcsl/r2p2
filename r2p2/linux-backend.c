@@ -377,7 +377,7 @@ void r2p2_poll(void)
 				recvlen = recvfrom(s->fd, buf, BUFLEN, 0,
 								   (struct sockaddr *)&client, &slen);
 				source.port = ntohs(client.sin_port);
-				source.ip = client.sin_addr.s_addr;
+				source.ip = ntohl(client.sin_addr.s_addr);
 #endif
 				if (recvlen < 0) {
 					free_buffer(gb);
@@ -457,7 +457,7 @@ int buf_list_send(generic_buffer first_buf, struct r2p2_host_tuple *dest,
 
 	server.sin_family = AF_INET;
 	server.sin_port = htons(dest->port);
-	server.sin_addr.s_addr = dest->ip;
+	server.sin_addr.s_addr = htonl(dest->ip);
 
 	gb = first_buf;
 	while (gb != NULL) {

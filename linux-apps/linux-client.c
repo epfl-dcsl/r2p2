@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 	// configure server destination
 	inet_pton(AF_INET, argv[1], &(sa.sin_addr));
 	destination.port = atoi(argv[2]);
-	destination.ip = sa.sin_addr.s_addr;
+	destination.ip = ntohl(sa.sin_addr.s_addr);
 
 	for (i = 1; i < THREAD_COUNT; i++) {
 		if (pthread_create(&tid, NULL, thread_main, (void *)(long)i)) {

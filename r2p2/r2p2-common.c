@@ -241,6 +241,11 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	generic_buffer gb, new_gb;
 	char *target, *src;
 
+	msg->req_id = req_id;
+
+	// Fix endianness for the header
+	req_id = htons(req_id);
+
 	// Compute the total payload
 	total_payload = 0;
 	for (int i = 0; i < iovcnt; i++)
@@ -289,7 +294,7 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 			r2p2h->rid = req_id;
 			r2p2h->header_size = sizeof(struct r2p2_header);
 			r2p2h->type_policy = (req_type << 4) | (0x0F & policy);
-			r2p2h->p_order = buffer_cnt++;
+			r2p2h->p_order = htons(buffer_cnt++);
 			r2p2h->flags = 0;
 			target += sizeof(struct r2p2_header);
 		}
@@ -312,11 +317,9 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	// Fix the header of the first and last packet
 	r2p2h = (struct r2p2_header *)get_buffer_payload(msg->head_buffer);
 	r2p2h->flags |= F_FLAG;
-	r2p2h->p_order = buffer_cnt;
+	r2p2h->p_order = htons(buffer_cnt);
 	r2p2h = (struct r2p2_header *)get_buffer_payload(msg->tail_buffer);
 	r2p2h->flags |= L_FLAG;
-
-	msg->req_id = req_id;
 }
 
 static int should_keep_req(__attribute__((unused))struct r2p2_server_pair *sp)
@@ -541,6 +544,10 @@ void handle_incoming_pck(generic_buffer gb, int len,
 	assert((unsigned)len >= sizeof(struct r2p2_header));
 	buf = get_buffer_payload(gb);
 	r2p2h = (struct r2p2_header *)buf;
+
+	// Fix endianness
+	r2p2h->rid = ntohs(r2p2h->rid);
+	r2p2h->p_order = ntohs(r2p2h->p_order);
 
 	if (is_response(r2p2h))
 #ifdef WITH_TIMESTAMPING

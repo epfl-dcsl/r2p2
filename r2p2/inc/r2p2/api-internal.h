@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <arpa/inet.h>
 #include <r2p2/api.h>
 #include <stdint.h>
 
@@ -171,7 +172,7 @@ static inline void r2p2_prepare_feedback(char *dest, uint32_t ip,
 	r2p2h->magic = MAGIC;
 	r2p2h->type_policy = (FEEDBACK_MSG << 4);
 
-	r2p2f->rid = rid;
-	r2p2f->ip = ip;
-	r2p2f->port = port;
+	r2p2f->rid = htons(rid);
+	r2p2f->ip = htonl(ip);
+	r2p2f->port = htons(port);
 }
