@@ -34,15 +34,10 @@
 #include <dp/dpdk_config.h>
 #include <net/net.h>
 #include <net/utils.h>
-#include <r2p2/cfg.h>
 
 int net_init(void)
 {
-	if (parse_config()) {
-		printf("cfg error\n");
-		return -1;
-	}
-
+	igmp_init();
 	return 0;
 }
 

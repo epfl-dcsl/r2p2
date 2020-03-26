@@ -38,6 +38,7 @@
 
 #include <net/utils.h>
 #include <net/igmp.h>
+
 #include <r2p2/cfg.h>
 
 #define ETH_MTU 1500
@@ -56,6 +57,7 @@ struct ip_tuple {
 /* Initialization */
 int net_init(void);
 int net_init_per_core(void);
+int igmp_init(void);
 
 int add_arp_entry(const char *ip, const char *mac);
 

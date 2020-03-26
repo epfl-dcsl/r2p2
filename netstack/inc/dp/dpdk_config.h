@@ -31,7 +31,13 @@
 #define ETH_DEV_TX_QUEUE_SZ 2048
 #define BATCH_SIZE 64
 #else
+#ifdef WITH_RAFT
+#define ETH_DEV_RX_QUEUE_SZ 4096
+#define ETH_DEV_TX_QUEUE_SZ 4096
+#define BATCH_SIZE 128
+#else
 #define ETH_DEV_RX_QUEUE_SZ 1024
 #define ETH_DEV_TX_QUEUE_SZ 512
 #define BATCH_SIZE 32
+#endif
 #endif

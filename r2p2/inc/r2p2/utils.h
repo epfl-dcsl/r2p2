@@ -24,7 +24,16 @@
 
 #pragma once
 
+#include <sys/time.h>
+
 #define min(a, b) ((a) < (b)) ? (a) : (b)
+
+static inline long time_us(void)
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return (long)tv.tv_sec * 1000000 + (long)tv.tv_usec;
+}
 
 #ifdef LINUX
 #include <stddef.h>

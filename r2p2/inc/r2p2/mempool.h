@@ -59,5 +59,10 @@ static inline struct fixed_obj *get_object_meta(void *obj)
 	return container_of(obj, struct fixed_obj, elem);
 }
 
+static inline struct fixed_obj *peek_from_list(struct fixed_linked_list *l)
+{
+	return l->head;
+}
+
 void add_to_list(struct fixed_linked_list *l, struct fixed_obj *obj);
 void remove_from_list(struct fixed_linked_list *l, struct fixed_obj *obj);

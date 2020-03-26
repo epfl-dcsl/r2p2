@@ -22,10 +22,13 @@
  * SOFTWARE.
  */
 
+//#define ENABLE_PCAP 1
 #include <inttypes.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 // Must be before all DPDK includes
 #include <rte_config.h>
@@ -44,6 +47,8 @@
 #include <dp/dpdk_api.h>
 
 #include <net/net.h>
+
+#include <r2p2/cfg.h>
 
 volatile bool force_quit;
 
@@ -67,6 +72,11 @@ int main(int argc, char **argv)
 	force_quit = false;
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
+
+	if (parse_config()) {
+		printf("cfg error\n");
+		return -1;
+	}
 
 	/*initialise dpdk*/
 	dpdk_init(&argc, &argv);

@@ -23,13 +23,43 @@
 ROOTDIR=$(shell git rev-parse --show-toplevel)
 RTE_SDK=$(ROOTDIR)/dpdk
 R2P2LIB_DIR=$(ROOTDIR)/r2p2
+RAFT_DIR=$(shell git rev-parse --show-toplevel)/../raft
 
 include $(ROOTDIR)/netstack/dp/dir.mk
-include $(ROOTDIR)//netstack/net/dir.mk
+include $(ROOTDIR)/netstack/net/dir.mk
 include $(R2P2LIB_DIR)/dir.mk
 
+
 CC=gcc
-CFLAGS += -g -O3 -I$(ROOTDIR)/netstack/inc -I$(R2P2LIB_DIR)/inc -I$(RTE_SDK)/x86_64-native-linuxapp-gcc/include -DNO_BATCH
+CFLAGS += -g -O3 -I$(ROOTDIR)/netstack/inc -I$(R2P2LIB_DIR)/inc -I$(RTE_SDK)/x86_64-native-linuxapp-gcc/include -I$(RAFT_DIR)/include -DNO_BATCH #-DACCELERATED #-DRAFT_STATS
+
+ifeq ($(WITH_RAFT), 1)
+	CFLAGS += -DWITH_RAFT
+endif
+
+ifeq ($(LB_REPLIES), 1)
+	CFLAGS += -DLB_REPLIES
+endif
+
+ifeq ($(SKIP_NO_SE), 1)
+	CFLAGS += -DSKIP_NO_SE
+endif
+
+ifeq ($(ACCELERATED), 1)
+	CFLAGS += -DACCELERATED
+endif
+
+ifeq ($(SWITCH_AGG), 1)
+	CFLAGS += -DSWITCH_AGG
+endif
+
+ifeq ($(SMART_LB), 1)
+	CFLAGS += -DSMART_LB
+endif
+
+ifdef PACKET_LOSS
+	CFLAGS += -DPACKET_LOSS=$(PACKET_LOSS)
+endif
 
 WERROR_FLAGS := -W -Wall -Wstrict-prototypes -Wmissing-prototypes
 WERROR_FLAGS += -Wmissing-declarations -Wold-style-definition -Wpointer-arith
@@ -38,10 +68,10 @@ WERROR_FLAGS += -Wformat-nonliteral -Wformat-security
 WERROR_FLAGS += -Wundef -Wwrite-strings
 
 CFLAGS += $(WERROR_FLAGS) -mavx2
-LDFLAGS= -Wl,--whole-archive -Wl,-ldpdk -Wl,--no-whole-archive -lrt -lpthread -lm -ldl -L$(RTE_SDK)/x86_64-native-linuxapp-gcc/lib -lconfig -lnuma -lpcap
+LDFLAGS= -Wl,--whole-archive -Wl,-ldpdk -Wl,--no-whole-archive -lrt -lpthread -lm -ldl -L$(RTE_SDK)/x86_64-native-linuxapp-gcc/lib -lconfig -lnuma -lgcov --coverage -lpcap
 
 SRCS_C := $(addprefix $(ROOTDIR)/netstack/dp/, $(DP_SRC)) $(addprefix $(ROOTDIR)/netstack/net/, $(NET_SRC)) $(addprefix $(R2P2LIB_DIR)/, $(R2P2_SRC_C))
-OBJS_C := $(patsubst %.c, %.o, $(SRCS_C))
+OBJS_C := $(patsubst %.c, %.o, $(SRCS_C)) $(RAFT_DIR)/libraft.a
 
 all:
 	make r2p2-echo
@@ -52,6 +82,9 @@ all:
 	make udp-echo
 	make udp-synthetic
 
+debug: cleanstate debug.o $(OBJS_C)
+	$(CC) -o $@ debug.o $(OBJS_C) $(LDFLAGS)
+
 r2p2-echo: cleanstate r2p2-echo.o $(OBJS_C)
 	$(CC) -o $@ r2p2-echo.o $(OBJS_C) $(LDFLAGS)
 
@@ -59,12 +92,18 @@ r2p2-echo-fdir: CFLAGS += -DFDIR
 r2p2-echo-fdir: cleanstate r2p2-echo.o $(OBJS_C)
 	$(CC) -o $@ r2p2-echo.o $(OBJS_C) $(LDFLAGS)
 
-synthetic-time: cleanstate r2p2-synthetic.o $(OBJS_C)
-	$(CC) -o $@ r2p2-synthetic.o $(OBJS_C) $(LDFLAGS)
+stss: cleanstate r2p2-stss.o $(OBJS_C)
+	$(CC) -o $@ r2p2-stss.o $(OBJS_C) $(LDFLAGS)
+
+synthetic-size: cleanstate r2p2-synthetic-size.o $(OBJS_C)
+	$(CC) -o $@ r2p2-synthetic-size.o $(OBJS_C) $(LDFLAGS)
+
+synthetic-time: cleanstate r2p2-synthetic-time.o $(OBJS_C)
+	$(CC) -o $@ r2p2-synthetic-time.o $(OBJS_C) $(LDFLAGS)
 
 synthetic-time-fdir: CFLAGS += -DFDIR
-synthetic-time-fdir: cleanstate r2p2-synthetic.o $(OBJS_C)
-	$(CC) -o $@ r2p2-synthetic.o $(OBJS_C) $(LDFLAGS)
+synthetic-time-fdir: cleanstate r2p2-synthetic-time.o $(OBJS_C)
+	$(CC) -o $@ r2p2-synthetic-time.o $(OBJS_C) $(LDFLAGS)
 
 r2p2-router: CFLAGS += -DROUTER
 r2p2-router: cleanstate r2p2-router.o $(OBJS_C)

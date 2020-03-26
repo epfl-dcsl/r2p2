@@ -31,8 +31,12 @@
 #include <dp/core.h>
 
 #include <r2p2/api.h>
+#include <r2p2/api-internal.h>
 
 #include <rte_eal.h>
+
+#define MAX_REPLY 1024*1024
+char payload[MAX_REPLY];
 
 static inline long time_us(void)
 {
@@ -52,18 +56,32 @@ static void spin(long usec)
 static void synthetic_recv_fn(long handle, struct iovec *iov,
 							  __attribute__((unused)) int iovcnt)
 {
-	long *to_spin;
-	long reply = 42;
-	struct iovec local_iov[1];
+	long *p, rep_size, req_size, to_spin, received;
+	int i;
+	struct iovec local_iov[2];
 
-	to_spin = (long *)iov->iov_base;
-	spin(*to_spin);
+	received = 0;
+	for (i=0;i<iovcnt;i++)
+		received += iov[i].iov_len;
+
+	p = (long *)iov->iov_base;
+	to_spin = *p;
+	p++;
+	req_size = *p;
+	p++;
+	rep_size = *p;
+
+	assert((unsigned long)received == (3*sizeof(long) + req_size));
+	spin(to_spin);
 
 	// reply
-	local_iov[0].iov_base = &reply;
+	assert(rep_size <= MAX_REPLY);
+	local_iov[0].iov_base = &rep_size;
 	local_iov[0].iov_len = sizeof(long);
+	local_iov[1].iov_base = payload;
+	local_iov[1].iov_len = rep_size;
 
-	r2p2_send_response(handle, local_iov, 1);
+	r2p2_send_response(handle, local_iov, 2);
 }
 
 int app_init(__attribute__((unused)) int argc,
@@ -76,6 +94,7 @@ int app_init(__attribute__((unused)) int argc,
 		return -1;
 	}
 
+	memset(payload, 'x', MAX_REPLY);
 	r2p2_set_recv_cb(synthetic_recv_fn);
 
 	return 0;

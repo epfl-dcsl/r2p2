@@ -22,15 +22,17 @@
  * SOFTWARE.
  */
 
-#include <arpa/inet.h>
 #include <assert.h>
+#include <arpa/inet.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
 #include <libconfig.h>
 
 #include <r2p2/cfg.h>
+#ifdef WITH_RAFT
+#include <r2p2/hovercraft.h>
+#endif
 
 #ifndef LINUX
 #include <net/net.h>
@@ -144,7 +146,39 @@ static int parse_multicast(void)
 	return 0;
 
 }
+#endif
 
+#ifdef WITH_RAFT
+static int parse_raft_peers(void)
+{
+	const config_setting_t *raft = NULL, *entry = NULL;
+	int i;
+	const char *ip = NULL;
+	uint32_t ip_int;
+
+	raft = config_lookup(&cfg, "raft");
+	if (!raft)
+		return -1;
+
+	CFG.raft_peers_cnt = config_setting_length(raft);
+	CFG.raft_peers =  malloc(sizeof(struct r2p2_raft_peer)*CFG.raft_peers_cnt);
+	for (i = 0; i < CFG.raft_peers_cnt; ++i) {
+		int port = -1;
+		printf("Found one peer: %d\n", i);
+		entry = config_setting_get_elem(raft, i);
+		config_setting_lookup_string(entry, "ip", &ip);
+		config_setting_lookup_int(entry, "port", &port);
+		if (!ip || (port < 0)) {
+			fprintf(stderr, "Error parsing raft peer\n");
+			return -1;
+		}
+		CFG.raft_peers[i].id = i;
+		inet_pton(AF_INET, ip, &ip_int);
+		CFG.raft_peers[i].host.ip = be32toh(ip_int);
+		CFG.raft_peers[i].host.port = port;
+	}
+	return 0;
+}
 #endif
 
 int parse_config(void)
@@ -177,6 +211,16 @@ int parse_config(void)
 	if (ret) {
 		fprintf(stderr, "no iface name found\n");
 		return ret;
+	}
+#endif
+
+#ifdef WITH_RAFT
+	// Parse raft peers if any
+	ret = parse_raft_peers();
+	if (ret) {
+		fprintf(stderr, "no Raft peers found\n");
+		CFG.raft_peers_cnt = 0;
+		CFG.raft_peers = NULL;
 	}
 #endif
 

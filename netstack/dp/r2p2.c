@@ -36,14 +36,19 @@
 #include <r2p2/api.h>
 #include <r2p2/cfg.h>
 #include <r2p2/mempool.h>
-
+#ifdef WITH_RAFT
+#include <r2p2/hovercraft.h>
+#endif
 #define TIMER_POOL_SIZE 4096
 
-static uint32_t router_ip;
 static __thread uint16_t local_port;
 static __thread struct r2p2_host_tuple local_host;
 static __thread struct fixed_mempool *client_req_timers;
 static __thread uint32_t loop_count;
+#ifdef WITH_RAFT
+static __thread struct rte_timer raft_timer;
+static __thread long raft_timer_last = 0;
+#endif
 
 static void dpdk_on_client_pair_free(void *data)
 {
@@ -134,6 +139,19 @@ static void r2p2lib_udp_recv(struct net_sge *entry, struct ip_tuple *id)
 						&local_host);
 }
 
+#ifdef WITH_RAFT
+static void raft_timer_cb(__attribute__((unused)) struct rte_timer *tim,
+		__attribute__((unused)) void *arg)
+{
+	long now = time_us();
+	if (now - raft_timer_last < 1000)
+		goto OUT;
+	r2p2_raft_tick();
+OUT:
+	raft_timer_last = now;
+}
+#endif
+
 /*
  * R2P2 public API
  */
@@ -141,7 +159,11 @@ int r2p2_init(__attribute__((unused)) int local_port)
 {
 	app_ops.udp_recv = r2p2lib_udp_recv;
 	set_net_ops(&app_ops);
-	router_ip = CFG.router_addr;
+
+#ifdef WITH_RAFT
+	assert(rte_lcore_count() == 2);
+	r2p2_raft_init();
+#endif
 
 	return 0;
 }
@@ -163,6 +185,18 @@ int r2p2_init_per_core(int queue_id, __attribute__((unused)) int core_count)
 		create_mempool(TIMER_POOL_SIZE, sizeof(struct rte_timer));
 	assert(client_req_timers);
 
+#ifdef WITH_RAFT
+	uint64_t hz;
+
+	// Allocate raft timer in raft peers
+	rte_timer_init(&raft_timer);
+	hz = rte_get_timer_hz();
+
+	/* Start a 1000 Hz timer for raft related ops. */
+	rte_timer_reset(&raft_timer, hz / 1000, PERIODICAL, rte_lcore_id(),
+			raft_timer_cb, NULL);
+#endif
+
 	r2p2_backend_init_per_core();
 
 	return 0;
@@ -171,8 +205,11 @@ int r2p2_init_per_core(int queue_id, __attribute__((unused)) int core_count)
 void r2p2_poll(void)
 {
 	net_poll();
-	if (loop_count++ % 1024 == 0)
+	if (loop_count++ % 256 == 0)
 		rte_timer_manage();
+#ifdef WITH_RAFT
+	do_raft_duties();
+#endif
 }
 
 /*
@@ -292,18 +329,24 @@ int disarm_timer(void *timer)
 
 void router_notify(uint32_t ip, uint16_t port, uint16_t rid)
 {
-#ifdef FDIR
-	struct ip_tuple id;
-	struct net_sge *entry;
+#if defined(FDIR) || defined(ACCELERATED)
+	struct r2p2_host_tuple dest;
+	generic_buffer gb;
 
-	id.src_ip = get_local_ip();
-	id.src_port = local_port;
-	id.dst_ip = router_ip;
-	id.dst_port = CFG.router_port;
+	dest.ip = CFG.router_addr;
+	dest.port = CFG.router_port;
 
-	entry = alloc_net_sge();
-	entry->len = sizeof(struct r2p2_header) + sizeof(struct r2p2_feedback);
-	r2p2_prepare_feedback(entry->payload, ip, port, rid);
-	udp_send(entry, &id);
+	gb = get_buffer();
+	assert(gb);
+	set_buffer_payload_size(gb, sizeof(struct r2p2_header) +
+			sizeof(struct r2p2_feedback));
+	r2p2_prepare_feedback(get_buffer_payload(gb), ip, port, rid);
+
+	buf_list_send(gb, &dest, NULL);
+#else
+	(void)ip;
+	(void)port;
+	(void)rid;
+
 #endif
 }

@@ -34,7 +34,7 @@ typedef void (*timeout_cb_f)(void *arg);
 typedef void (*recv_fn)(long handle, struct iovec *iov, int iovcnt);
 typedef int (*app_flow_control)(void);
 
-struct r2p2_host_tuple {
+struct __attribute__((packed)) r2p2_host_tuple {
 	uint32_t ip;
 	uint16_t port;
 };
@@ -42,6 +42,8 @@ struct r2p2_host_tuple {
 enum {
 	LB_ROUTE = 0,
 	FIXED_ROUTE,
+	REPLICATED_ROUTE,
+	REPLICATED_ROUTE_NO_SE, // replicated route no side effects
 };
 
 enum {
@@ -49,7 +51,7 @@ enum {
 	ERR_DROP_MSG,
 };
 
-struct r2p2_ctx {
+struct __attribute__((packed)) r2p2_ctx {
 	success_cb_f success_cb;
 	error_cb_f error_cb;
 	timeout_cb_f timeout_cb;

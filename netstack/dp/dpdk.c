@@ -78,7 +78,7 @@ void dpdk_init(int *argc, char ***argv)
 {
 	int ret;
 	unsigned int i;
-	uint8_t port_id;
+	uint8_t port_id = 0;
 	uint16_t nb_rx_q;
 	uint16_t nb_tx_q;
 	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; // 4096
@@ -92,13 +92,18 @@ void dpdk_init(int *argc, char ***argv)
 	*argc -= ret;
 	*argv += ret;
 
+#ifdef WITH_RAFT
+	nb_rx_q = 1;
+	nb_tx_q = 2;
+#else
 	nb_rx_q = rte_lcore_count();
 	nb_tx_q = rte_lcore_count();
+#endif
 
 	/* create the mbuf pool */
 	pktmbuf_pool =
 		rte_pktmbuf_pool_create("mbuf_pool", NB_MBUF, MEMPOOL_CACHE_SIZE, 0,
-								RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+				RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
 	if (pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 
@@ -109,57 +114,85 @@ void dpdk_init(int *argc, char ***argv)
 	printf("I found %" PRIu8 " ports\n", nb_ports);
 
 	printf("Configuring port...\n");
-	for (port_id = 0; port_id < nb_ports; port_id++) {
-		ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, &port_conf);
+	ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, &port_conf);
+
+	if (ret < 0) {
+		rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
+				ret, (unsigned)port_id);
+	}
+
+	/* enable multicast */
+	rte_eth_allmulticast_enable(port_id);
+
+#ifdef WITH_RAFT
+	ret = rte_eth_dev_configure(0, nb_rx_q, nb_tx_q, &port_conf);
+	/* enable multicast */
+	rte_eth_allmulticast_enable(0);
+
+	ret = rte_eth_tx_queue_setup(0, 0, nb_tx_desc,
+			rte_eth_dev_socket_id(0), NULL);
+	if (ret < 0) {
+		rte_exit(EXIT_FAILURE,
+				"rte_eth_tx_queue_setup:err=%d\n", ret);
+	}
+
+	ret = rte_eth_tx_queue_setup(0, 1, nb_tx_desc,
+			rte_eth_dev_socket_id(0), NULL);
+	if (ret < 0) {
+		rte_exit(EXIT_FAILURE,
+				"rte_eth_tx_queue_setup:err=%d\n", ret);
+	}
+
+	ret = rte_eth_rx_queue_setup(0, 0, nb_rx_desc,
+			rte_eth_dev_socket_id(0), NULL,
+			pktmbuf_pool);
+	if (ret < 0) {
+		rte_exit(EXIT_FAILURE,
+				"rte_eth_rx_queue_setup:err=%d, port=%u\n", ret,
+				(unsigned)port_id);
+	}
+#else
+	/* initialize one queue per cpu */
+	for (i = 0; i < rte_lcore_count(); i++) {
+		printf("setting up TX and RX queues...\n");
+		ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc,
+				rte_eth_dev_socket_id(port_id), NULL);
 		if (ret < 0) {
-			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
-					 ret, (unsigned)port_id);
+			rte_exit(EXIT_FAILURE,
+					"rte_eth_tx_queue_setup:err=%d, port=%u\n", ret,
+					(unsigned)port_id);
 		}
 
-		/* enable multicast */
-		rte_eth_allmulticast_enable(port_id);
-
-		/* initialize one queue per cpu */
-		for (i = 0; i < rte_lcore_count(); i++) {
-			printf("setting up TX and RX queues...\n");
-			ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc,
-										 rte_eth_dev_socket_id(port_id), NULL);
-			if (ret < 0) {
-				rte_exit(EXIT_FAILURE,
-						 "rte_eth_tx_queue_setup:err=%d, port=%u\n", ret,
-						 (unsigned)port_id);
-			}
-
-			ret = rte_eth_rx_queue_setup(port_id, i, nb_rx_desc,
-										 rte_eth_dev_socket_id(port_id), NULL,
-										 pktmbuf_pool);
-			if (ret < 0) {
-				rte_exit(EXIT_FAILURE,
-						 "rte_eth_rx_queue_setup:err=%d, port=%u\n", ret,
-						 (unsigned)port_id);
-			}
-		}
-
-		/* start the device */
-		ret = rte_eth_dev_start(port_id);
+		ret = rte_eth_rx_queue_setup(port_id, i, nb_rx_desc,
+				rte_eth_dev_socket_id(port_id), NULL,
+				pktmbuf_pool);
 		if (ret < 0) {
-			printf("ERROR starting device at port %d\n", port_id);
-		} else {
-			printf("started device at port %d\n", port_id);
+			rte_exit(EXIT_FAILURE,
+					"rte_eth_rx_queue_setup:err=%d, port=%u\n", ret,
+					(unsigned)port_id);
 		}
+	}
+#endif
 
-		/* check the link */
-		rte_eth_link_get(port_id, &link);
+	/* start the device */
+	ret = rte_eth_dev_start(port_id);
+	if (ret < 0) {
+		printf("ERROR starting device at port %d\n", port_id);
+	} else {
+		printf("started device at port %d\n", port_id);
+	}
 
-		if (!link.link_status) {
-			printf("eth:\tlink appears to be down, check connection.\n");
-		} else {
-			printf("eth:\tlink up - speed %u Mbps, %s\n",
-				   (uint32_t)link.link_speed,
-				   (link.link_duplex == ETH_LINK_FULL_DUPLEX)
-					   ? ("full-duplex")
-					   : ("half-duplex\n"));
-		}
+	/* check the link */
+	rte_eth_link_get(port_id, &link);
+
+	if (!link.link_status) {
+		printf("eth:\tlink appears to be down, check connection.\n");
+	} else {
+		printf("eth:\tlink up - speed %u Mbps, %s\n",
+				(uint32_t)link.link_speed,
+				(link.link_duplex == ETH_LINK_FULL_DUPLEX)
+				? ("full-duplex")
+				: ("half-duplex\n"));
 	}
 }
 

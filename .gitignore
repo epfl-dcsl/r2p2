@@ -25,6 +25,8 @@ r2p2-router
 r2p2-echo
 r2p2-echo-fdir
 synthetic-time
+synthetic-size
 synthetic-time-fdir
 udp-echo
 udp-synthetic
+stss

@@ -22,22 +22,39 @@
  * SOFTWARE.
  */
 
+#include <arpa/inet.h>
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include <r2p2/api-internal.h>
 #include <r2p2/mempool.h>
+#ifdef WITH_RAFT
+#ifdef LINUX
+static_assert(0, "HovercRaft only on DPDK");
+#endif
+#include <r2p2/hovercraft.h>
+#endif
 #ifdef WITH_TIMESTAMPING
 static_assert(LINUX, "Timestamping supported only in Linux");
 #include <r2p2/r2p2-linux.h>
 #include <r2p2/timestamping.h>
 #endif
 
-#define POOL_SIZE 1024
+#ifdef PACKET_LOSS
+static uint32_t current = 0;
+static uint32_t next;
+
+static void set_next_to_lose(void)
+{
+	next = current + (rand() % (2*PACKET_LOSS)) + 1;
+}
+#endif
+#define POOL_SIZE 65536
 #define min(a, b) ((a) < (b)) ? (a) : (b)
 
 static recv_fn rfn;
@@ -47,7 +64,8 @@ static __thread struct fixed_mempool *client_pairs;
 static __thread struct fixed_mempool *server_pairs;
 static __thread struct fixed_linked_list pending_client_pairs = {0};
 static __thread struct fixed_linked_list pending_server_pairs = {0};
-static __thread struct iovec to_app_iovec[0xFF]; // change this to 0xFF;
+static __thread struct iovec to_app_iovec[0xFF];
+static __thread uint16_t rid = 0;
 
 static struct r2p2_client_pair *alloc_client_pair(void)
 {
@@ -88,7 +106,7 @@ static void free_client_pair(struct r2p2_client_pair *cp)
 	free_object(cp);
 }
 
-static struct r2p2_server_pair *alloc_server_pair(void)
+struct r2p2_server_pair *alloc_server_pair(void)
 {
 	struct r2p2_server_pair *sp;
 
@@ -100,7 +118,7 @@ static struct r2p2_server_pair *alloc_server_pair(void)
 	return sp;
 }
 
-static void free_server_pair(struct r2p2_server_pair *sp)
+void free_server_pair(struct r2p2_server_pair *sp)
 {
 	generic_buffer gb;
 
@@ -184,6 +202,7 @@ find_in_pending_client_pairs(uint16_t req_id, struct r2p2_host_tuple *sender)
 	return NULL;
 }
 
+
 static int prepare_to_app_iovec(struct r2p2_msg *msg)
 {
 	generic_buffer gb;
@@ -191,6 +210,7 @@ static int prepare_to_app_iovec(struct r2p2_msg *msg)
 	int len, iovcnt = 0;
 
 	gb = msg->head_buffer;
+	assert(gb);
 	while (gb != NULL) {
 		buf = get_buffer_payload(gb);
 		assert(buf);
@@ -211,7 +231,7 @@ static void handle_drop_msg(struct r2p2_client_pair *cp)
 	free_client_pair(cp);
 }
 
-static void forward_request(struct r2p2_server_pair *sp)
+void forward_request(struct r2p2_server_pair *sp)
 {
 	int iovcnt;
 
@@ -219,7 +239,7 @@ static void forward_request(struct r2p2_server_pair *sp)
 	rfn((long)sp, to_app_iovec, iovcnt);
 }
 
-static void r2p2_msg_add_payload(struct r2p2_msg *msg, generic_buffer gb)
+void r2p2_msg_add_payload(struct r2p2_msg *msg, generic_buffer gb)
 {
 	if (msg->tail_buffer) {
 		chain_buffers(msg->tail_buffer, gb);
@@ -235,30 +255,28 @@ static void r2p2_msg_add_payload(struct r2p2_msg *msg, generic_buffer gb)
 void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 					  uint8_t req_type, uint8_t policy, uint16_t req_id)
 {
-	unsigned int iov_idx, bufferleft, copied, tocopy, buffer_cnt, total_payload,
-		single_packet_msg, is_first, should_small_first;
+	unsigned int iov_idx, buffer_cnt, total_payload, single_packet_msg,
+				 is_first, should_small_first;
+	int i, bufferleft, copied, tocopy;
 	struct r2p2_header *r2p2h;
 	generic_buffer gb, new_gb;
 	char *target, *src;
 
 	msg->req_id = req_id;
-
 	// Fix endianness for the header
 	req_id = htons(req_id);
 
-	// Compute the total payload
+	// Check if single or multi-packet msg
 	total_payload = 0;
-	for (int i = 0; i < iovcnt; i++)
+	for (i=0; i<iovcnt; i++)
 		total_payload += iov[i].iov_len;
 
-	if (total_payload <= PAYLOAD_SIZE)
-		single_packet_msg = 1;
-	else
-		single_packet_msg = 0;
+	single_packet_msg = total_payload > PAYLOAD_SIZE ? 0 : 1;
 
 	if (!single_packet_msg && (req_type == REQUEST_MSG))
 		should_small_first = 1;
-	else should_small_first = 0;
+	else
+		should_small_first = 0;
 
 	iov_idx = 0;
 	bufferleft = 0;
@@ -299,12 +317,12 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 			target += sizeof(struct r2p2_header);
 		}
 		src = iov[iov_idx].iov_base;
-		tocopy = min(bufferleft, iov[iov_idx].iov_len - copied);
+		tocopy = min(bufferleft, (int)(iov[iov_idx].iov_len - copied));
 		memcpy(target, &src[copied], tocopy);
 		copied += tocopy;
 		bufferleft -= tocopy;
 		target += tocopy;
-		if (copied == iov[iov_idx].iov_len) {
+		if (copied == (int)iov[iov_idx].iov_len) {
 			iov_idx++;
 			copied = 0;
 		}
@@ -344,7 +362,6 @@ static void send_drop_msg(struct r2p2_server_pair *sp)
 #ifdef LINUX
 	free_buffer(drop_msg.head_buffer);
 #endif
-
 }
 
 static void handle_response(generic_buffer gb, int len,
@@ -363,7 +380,7 @@ static void handle_response(generic_buffer gb, int len,
 
 	cp = find_in_pending_client_pairs(r2p2h->rid, local_host);
 	if (!cp) {
-		printf("No client pair found. RID = %d ORDER = %d\n", r2p2h->rid, r2p2h->p_order);
+		// printf("Expired timer?\n");
 		free_buffer(gb);
 		return;
 	}
@@ -379,6 +396,10 @@ static void handle_response(generic_buffer gb, int len,
 	cp->reply.sender = *source;
 
 	switch(get_msg_type(r2p2h)) {
+		case RAFT_REP:
+#ifndef WITH_RAFT
+			assert(0);
+#endif
 		case RESPONSE_MSG:
 			assert(cp->state == R2P2_W_RESPONSE);
 			set_buffer_payload_size(gb, len);
@@ -387,7 +408,6 @@ static void handle_response(generic_buffer gb, int len,
 			if (is_first(r2p2h)) {
 				cp->reply_expected_packets = r2p2h->p_order;
 				cp->reply_received_packets = 1;
-
 			} else {
 				if (r2p2h->p_order != cp->reply_received_packets++) {
 					printf("OOF in response\n");
@@ -395,7 +415,6 @@ static void handle_response(generic_buffer gb, int len,
 					remove_from_pending_client_pairs(cp);
 					free_client_pair(cp);
 					return;
-
 				}
 			}
 
@@ -409,7 +428,6 @@ static void handle_response(generic_buffer gb, int len,
 				remove_from_pending_client_pairs(cp);
 				free_client_pair(cp);
 				return;
-
 			}
 			if (cp->timer)
 				disarm_timer(cp->timer);
@@ -421,7 +439,6 @@ static void handle_response(generic_buffer gb, int len,
 					cp->ctx->tx_timestamp.tv_sec == 0) {
 				extract_tx_timestamp(((struct r2p2_socket *)cp->impl_data)->fd,
 						&cp->ctx->tx_timestamp);
-
 			}
 #endif
 
@@ -462,6 +479,7 @@ static void handle_request(generic_buffer gb, int len,
 	char ack_payload[] = "ACK";
 	struct iovec ack;
 	struct r2p2_msg ack_msg = {0};
+	int was_in_pending_sp = 0;
 
 	req_id = r2p2h->rid;
 	if (is_first(r2p2h)) {
@@ -478,7 +496,8 @@ static void handle_request(generic_buffer gb, int len,
 		sp->request_expected_packets = r2p2h->p_order;
 		sp->request_received_packets = 1;
 
-		if (!should_keep_req(sp)) {
+		/* Flow control only request messages, not Raft reqs */
+		if (get_msg_type(r2p2h) == REQUEST_MSG && !should_keep_req(sp)) {
 			set_buffer_payload_size(gb, len);
 			r2p2_msg_add_payload(&sp->request, gb);
 			send_drop_msg(sp);
@@ -490,26 +509,33 @@ static void handle_request(generic_buffer gb, int len,
 			// add to pending request
 			add_to_pending_server_pairs(sp);
 
-			// send ACK
-			ack.iov_base = ack_payload;
-			ack.iov_len = 3;
-			r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_MSG, FIXED_ROUTE, req_id);
-			buf_list_send(ack_msg.head_buffer, source, NULL);
+			/* Raft reqs don't send REQ0 */
+			if (!is_raft_msg(r2p2h)) {
+				// send ACK
+				ack.iov_base = ack_payload;
+				ack.iov_len = 3;
+				r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_MSG, FIXED_ROUTE, req_id);
+				buf_list_send(ack_msg.head_buffer, source, NULL);
 #ifdef LINUX
-			free_buffer(ack_msg.head_buffer);
+				free_buffer(ack_msg.head_buffer);
 #endif
+			}
 		}
 	} else {
 		// find in pending msgs
 		sp = find_in_pending_server_pairs(req_id, source);
-		assert(sp);
-		if (r2p2h->p_order != sp->request_received_packets++) {
-			printf("OOF in request\n");
-			remove_from_pending_server_pairs(sp);
-			free_server_pair(sp);
+		if (!sp) {
 			free_buffer(gb);
 			return;
 		}
+		if (r2p2h->p_order != sp->request_received_packets++) {
+			printf("OOF in request\n");
+			remove_from_pending_server_pairs(sp);
+			free_buffer(gb);
+			free_server_pair(sp);
+			return;
+		}
+		was_in_pending_sp = 1;
 	}
 	set_buffer_payload_size(gb, len);
 	r2p2_msg_add_payload(&sp->request, gb);
@@ -523,8 +549,32 @@ static void handle_request(generic_buffer gb, int len,
 		free_server_pair(sp);
 		return;
 	}
-	assert(rfn);
-	forward_request(sp);
+
+	if (was_in_pending_sp)
+		remove_from_pending_server_pairs(sp);
+
+#ifdef ACCELERATED
+	sp->received_at = time_us();
+#endif
+	if (is_raft_msg(r2p2h)) {
+#ifdef WITH_RAFT
+		raft_process(&sp->request);
+#else
+		assert(0);
+#endif
+		return;
+	}
+
+	if (is_replicated_req(r2p2h))
+#ifdef WITH_RAFT
+		handle_replicated_req(sp);
+#else
+		assert(0);
+#endif
+	else {
+		assert(rfn);
+		forward_request(sp);
+	}
 }
 
 void handle_incoming_pck(generic_buffer gb, int len,
@@ -539,6 +589,13 @@ void handle_incoming_pck(generic_buffer gb, int len,
 	struct r2p2_header *r2p2h;
 	char *buf;
 
+#ifdef PACKET_LOSS
+	if (current++ == next) {
+		set_next_to_lose();
+		free_buffer(gb);
+		return;
+	}
+#endif
 	if ((unsigned)len < sizeof(struct r2p2_header))
 		printf("I received %d\n", len);
 	assert((unsigned)len >= sizeof(struct r2p2_header));
@@ -549,7 +606,13 @@ void handle_incoming_pck(generic_buffer gb, int len,
 	r2p2h->rid = ntohs(r2p2h->rid);
 	r2p2h->p_order = ntohs(r2p2h->p_order);
 
-	if (is_response(r2p2h))
+	if (is_raft_single_msg(r2p2h))
+#ifdef WITH_RAFT
+		raft_handle_single_msg(gb, len, source, local_host);
+#else
+		assert(0);
+#endif
+	else if (is_response(r2p2h))
 #ifdef WITH_TIMESTAMPING
 		handle_response(gb, len, r2p2h, source, local_host, last_rx_timestamp);
 #else
@@ -570,6 +633,9 @@ int r2p2_backend_init_per_core(void)
 
 	srand((unsigned)time(&t));
 
+#ifdef PACKET_LOSS
+	set_next_to_lose();
+#endif
 	return 0;
 }
 
@@ -581,8 +647,6 @@ void timer_triggered(struct r2p2_client_pair *cp)
 
 	assert(cp->ctx->timeout_cb);
 	cp->ctx->timeout_cb(cp->ctx->arg);
-	//printf("Timer triggered: received packets %d expected %d\n",
-	//		cp->reply_received_packets, cp->reply_expected_packets);
 
 	remove_from_pending_client_pairs(cp);
 	free_client_pair(cp);
@@ -591,28 +655,69 @@ void timer_triggered(struct r2p2_client_pair *cp)
 /*
  * API
  */
-void r2p2_send_response(long handle, struct iovec *iov, int iovcnt)
+static inline void __r2p2_send_response(long handle, struct iovec *iov,
+		int iovcnt, int rep_type)
 {
 	struct r2p2_server_pair *sp;
+	struct r2p2_header *r2p2h;
 
 	sp = (struct r2p2_server_pair *)handle;
-	r2p2_prepare_msg(&sp->reply, iov, iovcnt, RESPONSE_MSG, FIXED_ROUTE,
-					 sp->request.req_id);
-	buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+	r2p2h = (struct r2p2_header *)get_buffer_payload(sp->request.head_buffer);
+	if (is_replicated_req(r2p2h)) {
+#ifndef WITH_RAFT
+		assert(0);
+#endif
+		/* This runs in the worker thread */
+		/* Decide here who will reply */
+		if (!(sp->flags & SHOULD_REPLY))
+			return;
+		bzero(&sp->reply, sizeof(struct r2p2_msg));
+		r2p2_prepare_msg(&sp->reply, iov, iovcnt, rep_type, FIXED_ROUTE,
+						 sp->request.req_id);
+		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
-	// Notify router
-	router_notify(sp->request.sender.ip, sp->request.sender.port,
-			sp->request.req_id);
+		// Notify router
+		router_notify(sp->request.sender.ip, sp->request.sender.port,
+				sp->request.req_id);
+	} else {
+		r2p2_prepare_msg(&sp->reply, iov, iovcnt, rep_type, FIXED_ROUTE,
+						 sp->request.req_id);
+		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
-	remove_from_pending_server_pairs(sp);
-	free_server_pair(sp);
+		// Notify router not for Raft requests
+		if (!is_raft_msg(r2p2h))
+			router_notify(sp->request.sender.ip, sp->request.sender.port,
+					sp->request.req_id);
+
+		free_server_pair(sp);
+	}
 }
 
-void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
+void r2p2_send_response(long handle, struct iovec *iov, int iovcnt)
+{
+	return __r2p2_send_response(handle, iov, iovcnt, RESPONSE_MSG);
+}
+
+#ifdef WITH_RAFT
+void r2p2_send_raft_response(long handle, struct iovec *iov, int iovcnt)
+{
+	__r2p2_send_response(handle, iov, iovcnt, RAFT_REP);
+}
+
+void r2p2_send_raft_msg(struct r2p2_host_tuple *dst, struct iovec *iov, int iovcnt)
+{
+	struct r2p2_msg reply = {0};
+
+	r2p2_prepare_msg(&reply, iov, iovcnt, RAFT_MSG, FIXED_ROUTE, 0);
+	buf_list_send(reply.head_buffer, dst, NULL);
+}
+#endif
+
+static inline void __r2p2_send_req(struct iovec *iov, int iovcnt,
+		struct r2p2_ctx *ctx, int req_type)
 {
 	generic_buffer second_buffer;
 	struct r2p2_client_pair *cp;
-	uint16_t rid;
 
 	cp = alloc_client_pair();
 	assert(cp);
@@ -623,25 +728,45 @@ void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
 		return;
 	}
 
-	rid = rand();
-	r2p2_prepare_msg(&cp->request, iov, iovcnt, REQUEST_MSG,
-					 ctx->routing_policy, rid);
-	cp->state = cp->request.head_buffer == cp->request.tail_buffer
-					? R2P2_W_RESPONSE
-					: R2P2_W_ACK;
+	// FIXME: Make sure the rid is available
+	//rid = rand();
+	rid++;
+	r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type, ctx->routing_policy,
+			rid);
 
 	add_to_pending_client_pairs(cp);
 
-	// Send only the first packet
-	second_buffer = get_buffer_next(cp->request.head_buffer);
-	chain_buffers(cp->request.head_buffer, NULL);
-	buf_list_send(cp->request.head_buffer, ctx->destination, cp->impl_data);
+	if (req_type == RAFT_REQ) {
+		cp->state = R2P2_W_RESPONSE;
+		buf_list_send(cp->request.head_buffer, ctx->destination, cp->impl_data);
+	} else {
+		cp->state = cp->request.head_buffer == cp->request.tail_buffer
+						? R2P2_W_RESPONSE
+						: R2P2_W_ACK;
+
+		// Send only the first packet
+		second_buffer = get_buffer_next(cp->request.head_buffer);
+		chain_buffers(cp->request.head_buffer, NULL);
+		buf_list_send(cp->request.head_buffer, ctx->destination, cp->impl_data);
 #ifdef LINUX
-	chain_buffers(cp->request.head_buffer, second_buffer);
+		chain_buffers(cp->request.head_buffer, second_buffer);
 #else
-	cp->request.head_buffer = second_buffer;
+		cp->request.head_buffer = second_buffer;
 #endif
+	}
 }
+
+void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
+{
+	__r2p2_send_req(iov, iovcnt, ctx, REQUEST_MSG);
+}
+
+#ifdef WITH_RAFT
+void r2p2_send_raft_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
+{
+	__r2p2_send_req(iov, iovcnt, ctx, RAFT_REQ);
+}
+#endif
 
 void r2p2_recv_resp_done(long handle)
 {
@@ -659,4 +784,65 @@ void r2p2_set_recv_cb(recv_fn fn)
 void r2p2_set_app_flow_control_fn(app_flow_control fn)
 {
 	afc_fn = fn;
+}
+
+int gbuffer_read(struct gbuffer_reader *reader, char *dst, int size)
+{
+	int left_to_copy, to_copy;
+	char *src;
+
+	left_to_copy = size;
+	while(left_to_copy) {
+		if (!reader->left_in_buffer) {
+			reader->current_buffer = get_buffer_next(reader->current_buffer);
+			if (!reader->current_buffer)
+				break;
+			reader->left_in_buffer = get_buffer_payload_size(reader->current_buffer);
+			reader->left_in_buffer -= sizeof(struct r2p2_header);
+		}
+		src = (char *)get_buffer_payload(reader->current_buffer) +
+			(get_buffer_payload_size(reader->current_buffer) - reader->left_in_buffer);
+		to_copy = min(reader->left_in_buffer, left_to_copy);
+		memcpy(dst, src, to_copy);
+
+		left_to_copy -= to_copy;
+		reader->left_in_buffer -= to_copy;
+		src += to_copy;
+		dst += to_copy;
+	}
+
+	return size - left_to_copy;
+}
+
+int gbuffer_skip(struct gbuffer_reader *reader, int size)
+{
+	int left_to_skip;
+
+	left_to_skip = size;
+	while(left_to_skip) {
+		if (!reader->left_in_buffer) {
+			reader->current_buffer = get_buffer_next(reader->current_buffer);
+			if (!reader->current_buffer)
+				break;
+			reader->left_in_buffer = get_buffer_payload_size(reader->current_buffer);
+			reader->left_in_buffer -= sizeof(struct r2p2_header);
+		}
+		if (reader->left_in_buffer < left_to_skip) {
+			left_to_skip -= reader->left_in_buffer;
+			reader->left_in_buffer = 0;
+		} else {
+			reader->left_in_buffer -= left_to_skip;
+			left_to_skip = 0;
+		}
+	}
+	return size - left_to_skip;
+}
+
+int gbuffer_reader_init(struct gbuffer_reader *reader, generic_buffer gb)
+{
+	reader->current_buffer = gb;
+	reader->left_in_buffer = get_buffer_payload_size(gb);
+	reader->left_in_buffer -= sizeof(struct r2p2_header);
+
+	return 0;
 }

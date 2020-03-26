@@ -30,6 +30,9 @@
 
 struct fixed_mempool *create_mempool(int pool_size, int object_size)
 {
+	/*
+	 * FIXME!!! Make sure pool_size is a power of 2
+	 */
 	struct fixed_mempool *mpool =
 		malloc(sizeof(struct fixed_mempool) +
 			   pool_size * sizeof(struct fixed_obj) + pool_size * object_size);
