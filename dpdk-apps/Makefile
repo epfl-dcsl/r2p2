@@ -57,6 +57,10 @@ ifeq ($(SMART_LB), 1)
 	CFLAGS += -DSMART_LB
 endif
 
+ifeq ($(VIEW_CHANGE_EXP), 1)
+    CFLAGS += -DVIEW_CHANGE_EXP
+endif
+
 ifdef PACKET_LOSS
 	CFLAGS += -DPACKET_LOSS=$(PACKET_LOSS)
 endif

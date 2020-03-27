@@ -975,10 +975,12 @@ static void announce_increased_commit(void)
 			msg.prev_log_idx = 0;
 			msg.prev_log_term = 0;
 		}
+#ifndef VIEW_CHANGE_EXP
 		// FIXME: check if a node has fallen behind too much or turn this
 		// to a multicast single message instead
-		//send_raft_msg(peer->id, (union generic_raft_msg *)&msg,
-		//		ANNOUNCE_COMMIT_REQ, NULL);
+		send_raft_msg(peer->id, (union generic_raft_msg *)&msg,
+				ANNOUNCE_COMMIT_REQ, NULL);
+#endif
 	}
 #endif
 }
