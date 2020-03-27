@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <arpa/inet.h>
 #include <r2p2/api.h>
 #include <stdint.h>
 
