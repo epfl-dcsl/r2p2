@@ -125,6 +125,7 @@ void dpdk_init(int *argc, char ***argv)
 	rte_eth_allmulticast_enable(port_id);
 
 #ifdef WITH_RAFT
+	(void)i;
 	ret = rte_eth_dev_configure(0, nb_rx_q, nb_tx_q, &port_conf);
 	/* enable multicast */
 	rte_eth_allmulticast_enable(0);
