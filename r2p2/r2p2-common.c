@@ -268,10 +268,14 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 
 	// Check if single or multi-packet msg
 	total_payload = 0;
-	for (i=0; i<iovcnt; i++)
+	single_packet_msg = 1;
+	for (i=0; i<iovcnt; i++) {
 		total_payload += iov[i].iov_len;
-
-	single_packet_msg = total_payload > PAYLOAD_SIZE ? 0 : 1;
+		if (total_payload > PAYLOAD_SIZE) {
+			single_packet_msg = 0;
+			break;
+		}
+	}
 
 	if (!single_packet_msg && (req_type == REQUEST_MSG))
 		should_small_first = 1;
