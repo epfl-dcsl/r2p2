@@ -75,7 +75,11 @@ CFLAGS += $(WERROR_FLAGS) -mavx2
 LDFLAGS= -Wl,--whole-archive -Wl,-ldpdk -Wl,--no-whole-archive -lrt -lpthread -lm -ldl -L$(RTE_SDK)/x86_64-native-linuxapp-gcc/lib -lconfig -lnuma -lgcov --coverage -lpcap
 
 SRCS_C := $(addprefix $(ROOTDIR)/netstack/dp/, $(DP_SRC)) $(addprefix $(ROOTDIR)/netstack/net/, $(NET_SRC)) $(addprefix $(R2P2LIB_DIR)/, $(R2P2_SRC_C))
-OBJS_C := $(patsubst %.c, %.o, $(SRCS_C)) $(RAFT_DIR)/libraft.a
+OBJS_C := $(patsubst %.c, %.o, $(SRCS_C))
+
+ifeq ($(WITH_RAFT), 1)
+	OBJS_C += $(RAFT_DIR)/libraft.a
+endif
 
 all:
 	make r2p2-echo
