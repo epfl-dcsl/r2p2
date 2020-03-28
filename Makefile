@@ -20,9 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+.PHONY: dpdk dpdk-apps linux-apps
+
 all:
 	make dpdk-apps
 	make linux-apps
+
+dpdk:
+	make -C dpdk config T=x86_64-native-linuxapp-gcc
+	make -C dpdk -sj
+	bash -c "mv dpdk/build dpdk/x86_64-native-linuxapp-gcc"
 
 dpdk-apps:
 	make -C dpdk-apps

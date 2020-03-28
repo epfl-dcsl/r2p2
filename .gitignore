@@ -10,7 +10,6 @@
 *.log
 *.pyc
 *.a
-dpdk/
 build/
 .DS_Store
 osdi.pdf

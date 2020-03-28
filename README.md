@@ -7,15 +7,17 @@ The existing R2P2 implementation supports both a Linux-based implementation most
 
 ## Building R2P2
 
-To build and run R2P2 you need to download and build DPDK and prepare the machine to run an R2P2 application.
+To build and run R2P2 you need to build DPDK and prepare the machine to run an R2P2 application.
 The ``init.sh`` fetches and builds DPDK, allocates hugepages, and configures the NIC for use with DPDK.
 Specifically:
 
 ```bash
 export DEVICE_NAME=<your-interface-name>
 export PCI_ADDR=<the-devive-pci-address>
-./init.sh
+git submodule update --init --recursive
+make dpdk
 make
+./init.sh
 ```
 
 ## Code Structure
