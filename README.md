@@ -99,7 +99,6 @@ On the client machine run:
 
 The R2P2 router can run either as a software middlebox or as part of a Tofino ASIC. In this repository we only include the software DPDK implementation.
 
-For the P4 source please contact <marios.kogias@epfl.ch>.
 
 ### Software Router options
 ```bash
@@ -108,3 +107,17 @@ Usage: ./router -l 0,2 -- <target_ip:base_port:count,...> <per_queue_slots> <ran
 
 The software router runs on 2 cores (0,2) and implements 3 different policies: ``rand`` for random selections, ``rr``for round-robin, and ``fc`` for JBSQ.
 The takes a comaseparated list of servers. For each server provide the target ip, the base port, and how many ports this server exposes separated by colon. For example 10.0.0.1:8000:2 registers 2 queues to the R2P2 router both at 10.0.0.1, one at 8000, and one at 8001. The ``per_queue_slots`` arguement is only useful in the JBSQ(n) case and it's the ``n``. For the other policies, this argument should be 0.
+
+### HovercRaft
+
+To run R2P2 with the HovercRaft extension (See the Eurosys [paper](https://infoscience.epfl.ch/record/276586) for more details) you need to build with `WITH_RAFT=1` as described in the HovercRaft [repo](https://github.com/epfl-dcsl/hovercraft).
+
+Also, you need to configure your `r2p2.conf` accirdingly. Specifically, you need to add raft peers and the used multicast groups as in the `r2p2.conf.sample`.
+
+
+### HovercRaft++
+
+For HovercRaft++ (in-network acceleration for HovercRaft) you need to also add the switch peer. So, in the `raft` section of your `r2p2.conf` you need to have an even number of peers, and the last one corresponds to the switch.
+
+### P4 Source Code
+For the P4 source code for `JBSQ` and `HovercRaft++` please contact <marios.kogias@epfl.ch>.
