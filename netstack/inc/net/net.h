@@ -37,6 +37,8 @@
 #include <rte_udp.h>
 
 #include <net/utils.h>
+#include <net/igmp.h>
+
 #include <r2p2/cfg.h>
 
 #define ETH_MTU 1500
@@ -55,6 +57,7 @@ struct ip_tuple {
 /* Initialization */
 int net_init(void);
 int net_init_per_core(void);
+int igmp_init(void);
 
 int add_arp_entry(const char *ip, const char *mac);
 
@@ -69,6 +72,7 @@ void ip_out(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph, uint32_t src_ip,
 			uint32_t dst_ip, uint8_t ttl, uint8_t tos, uint8_t proto,
 			uint16_t l4len, struct ether_addr *dst_haddr);
 void icmp_in(void *pkt_buf, struct ipv4_hdr *iph, struct icmp_hdr *icmph);
+void igmp_in(void *pkt_buf, struct ipv4_hdr *iph, struct igmpv2_hdr *igmph);
 void udp_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
 			struct udp_hdr *udph);
 int udp_out(struct rte_mbuf *pkt_buf, struct ip_tuple *id, int len);

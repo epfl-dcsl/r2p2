@@ -284,8 +284,8 @@ static void handle_timer_for_socket(struct r2p2_socket *s)
 {
 	// Disable timer
 	__disarm_timer(s->tfd);
-	assert(s->taken);
-	timer_triggered(s->cp);
+	if (s->taken)
+		timer_triggered(s->cp);
 }
 
 static void handle_free_timer(struct free_timer *ft) {
@@ -473,7 +473,7 @@ void r2p2_poll(void)
 				recvlen = recvfrom(s->fd, buf, BUFLEN, 0,
 								   (struct sockaddr *)&client, &slen);
 				source.port = ntohs(client.sin_port);
-				source.ip = client.sin_addr.s_addr;
+				source.ip = ntohl(client.sin_addr.s_addr);
 #endif
 				if (recvlen < 0) {
 					free_buffer(gb);
@@ -553,7 +553,7 @@ int buf_list_send(generic_buffer first_buf, struct r2p2_host_tuple *dest,
 
 	server.sin_family = AF_INET;
 	server.sin_port = htons(dest->port);
-	server.sin_addr.s_addr = dest->ip;
+	server.sin_addr.s_addr = htonl(dest->ip);
 
 	gb = first_buf;
 	while (gb != NULL) {
@@ -612,13 +612,18 @@ int sp_restart_timer(struct r2p2_server_pair *sp, long timeout) {
   return 0;
 }
 
-void router_notify(void)
+void router_notify(uint32_t ip, uint16_t port, uint16_t rid)
 {
 #ifdef WITH_ROUTER
 	int ret;
+	char buf[64];
+
+	r2p2_prepare_feedback(buf, ip, port, rid);
 	socklen_t len = sizeof(struct sockaddr_in);
 
-	ret = sendto(sock.fd, NULL, 0, 0, (struct sockaddr *)&router_addr, len);
-	assert(ret == 0);
+	ret = sendto(sock.fd, buf,
+			sizeof(struct r2p2_header) + sizeof(struct r2p2_feedback), 0,
+			(struct sockaddr *)&router_addr, len);
+	assert(ret == sizeof(struct r2p2_header) + sizeof(struct r2p2_feedback));
 #endif
 }

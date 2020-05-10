@@ -51,8 +51,8 @@ void eth_in(struct rte_mbuf *pkt_buf)
 		iph = (struct ipv4_hdr *)(payload + (sizeof(struct ether_hdr)));
 		ip_in(pkt_buf, iph);
 	} else {
-		printf("Unknown ether type: %" PRIu16 "\n",
-			   rte_be_to_cpu_16(hdr->ether_type));
+		//printf("Unknown ether type: %" PRIu16 "\n",
+		//	   rte_be_to_cpu_16(hdr->ether_type));
 		rte_pktmbuf_free(pkt_buf);
 	}
 }

@@ -24,9 +24,12 @@
 
 #pragma once
 
+#include <r2p2/api-internal.h>
 #ifndef LINUX
 #include <rte_config.h>
 #endif
+
+#define MAX_MULTICAST_IPS 64
 
 struct cfg_parameters {
 	uint32_t host_addr;
@@ -34,6 +37,10 @@ struct cfg_parameters {
 	uint32_t router_addr;
 	uint16_t router_port;
 	char if_name[64];
+	uint16_t raft_peers_cnt;
+	struct r2p2_raft_peer * raft_peers;
+	uint32_t multicast_ips[MAX_MULTICAST_IPS];
+	uint8_t multicast_cnt;
 };
 
 struct cfg_parameters CFG;

@@ -22,64 +22,23 @@
  * SOFTWARE.
  */
 
-#include <assert.h>
-#include <inttypes.h>
-#include <stdbool.h>
-#include <stdio.h>
+#pragma once
 
-// Must be before all DPDK includes
-#include <rte_config.h>
-
-#include <rte_common.h>
-#include <rte_eal.h>
-#include <rte_ethdev.h>
-#include <rte_mempool.h>
-
-#include <dp/api.h>
-#include <dp/core.h>
-#ifdef SHOULD_TRACE
-#include <dp/queue_trace.h>
-#endif
-#include <net/net.h>
 #include <r2p2/api-internal.h>
-#ifdef WITH_RAFT
-#include <r2p2/hovercraft.h>
-#endif
 
-RTE_DEFINE_PER_LCORE(int, queue_id);
-RTE_DEFINE_PER_LCORE(struct wnd_stats *, rtcl_stats);
+#include <raft.h>
 
-int core_main(void *arg)
-{
-#ifdef SHOULD_TRACE
-	trace_init();
-#endif
-	int q_id = (int)(long)arg;
+#define LOG_ENTRY_COUNT (1<<15)
 
-	printf("Hello from core : %u with queue %d\n", rte_lcore_id(), q_id);
-	RTE_PER_LCORE(queue_id) = q_id;
+struct log_item {
+	struct r2p2_server_pair sp;
+	raft_entry_t *entry;
+};
 
-	/* Init run-to-completion stats */
-	RTE_PER_LCORE(rtcl_stats) = wnd_stats_init(RTC_WND);
+struct r2p2_raft_log {
+	uint32_t head;
+	struct log_item items[LOG_ENTRY_COUNT];
+};
 
-	/* initialise network per core */
-	net_init_per_core();
-
-#ifdef WITH_RAFT
-	if (q_id == 0)
-		app_main();
-	else
-		raft_worker();
-#else
-	app_main();
-#endif
-
-#ifdef SHOULD_TRACE
-#ifdef CONN_TIME
-	tcp_dump_conn_stats();
-#endif
-	trace_end();
-#endif
-
-	return 0;
-}
+int r2p2_raft_log_add(raft_entry_t *entry);
+struct r2p2_raft_log *r2p2_raft_log_init(void);

@@ -22,64 +22,50 @@
  * SOFTWARE.
  */
 
-#include <assert.h>
-#include <inttypes.h>
-#include <stdbool.h>
 #include <stdio.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
-// Must be before all DPDK includes
-#include <rte_config.h>
+#include <r2p2/raft-log.h>
+#include <r2p2/mempool.h>
 
-#include <rte_common.h>
-#include <rte_eal.h>
-#include <rte_ethdev.h>
-#include <rte_mempool.h>
+static struct r2p2_raft_log *log;
 
-#include <dp/api.h>
-#include <dp/core.h>
-#ifdef SHOULD_TRACE
-#include <dp/queue_trace.h>
-#endif
-#include <net/net.h>
-#include <r2p2/api-internal.h>
-#ifdef WITH_RAFT
-#include <r2p2/hovercraft.h>
-#endif
 
-RTE_DEFINE_PER_LCORE(int, queue_id);
-RTE_DEFINE_PER_LCORE(struct wnd_stats *, rtcl_stats);
-
-int core_main(void *arg)
+int r2p2_raft_log_add(raft_entry_t *entry)
 {
-#ifdef SHOULD_TRACE
-	trace_init();
-#endif
-	int q_id = (int)(long)arg;
+	struct r2p2_server_pair *sp;
+	struct log_item *it;
+	generic_buffer gb;
 
-	printf("Hello from core : %u with queue %d\n", rte_lcore_id(), q_id);
-	RTE_PER_LCORE(queue_id) = q_id;
+	it = &log->items[log->head++ % LOG_ENTRY_COUNT];
+	sp = entry->data.buf;
 
-	/* Init run-to-completion stats */
-	RTE_PER_LCORE(rtcl_stats) = wnd_stats_init(RTC_WND);
+	// Make old entry buf NULL to know log is overwritten
+	// and free request buffers
+	if (it->entry) {
+		it->entry->data.buf = NULL;
 
-	/* initialise network per core */
-	net_init_per_core();
+		gb = it->sp.request.head_buffer;
+		while (gb != NULL) {
+			free_buffer(gb);
+			gb = get_buffer_next(gb);
+		}
+	}
 
-#ifdef WITH_RAFT
-	if (q_id == 0)
-		app_main();
-	else
-		raft_worker();
-#else
-	app_main();
-#endif
-
-#ifdef SHOULD_TRACE
-#ifdef CONN_TIME
-	tcp_dump_conn_stats();
-#endif
-	trace_end();
-#endif
+	//copy
+	memcpy(&it->sp, sp, sizeof(struct r2p2_server_pair));
+	it->entry = entry;
+	entry->data.buf = &it->sp;
 
 	return 0;
+}
+
+struct r2p2_raft_log *r2p2_raft_log_init(void)
+{
+	log = malloc(sizeof(struct r2p2_raft_log));
+	assert(log);
+	bzero(log, sizeof(struct r2p2_raft_log));
+	return log;
 }

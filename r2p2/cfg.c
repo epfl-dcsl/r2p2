@@ -22,14 +22,17 @@
  * SOFTWARE.
  */
 
+#include <assert.h>
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
 #include <libconfig.h>
 
 #include <r2p2/cfg.h>
+#ifdef WITH_RAFT
+#include <r2p2/hovercraft.h>
+#endif
 
 #ifndef LINUX
 #include <net/net.h>
@@ -103,6 +106,79 @@ static int parse_arp(void)
 	}
 	return 0;
 }
+
+static int parse_multicast(void)
+{
+	const config_setting_t *multicast = NULL;
+	int i, j;
+	const char *ip_str;
+	struct in_addr mcast_ip;
+	char mac[64], *ptr;
+	char tmp[64];
+	uint8_t mac_parts[3];
+
+
+	multicast = config_lookup(&cfg, "multicast");
+	if (!multicast) {
+		fprintf(stderr, "no multicast entries defined in config\n");
+		return -1;
+	}
+
+	for (i = 0; i < config_setting_length(multicast); ++i) {
+		ip_str = config_setting_get_string_elem (multicast,i);
+		printf("Multicast IP: %s\n", ip_str);
+		inet_pton(AF_INET, ip_str, &mcast_ip);
+		CFG.multicast_ips[CFG.multicast_cnt++] = be32toh(mcast_ip.s_addr);
+		strcpy(tmp, ip_str);
+		ptr = strtok(tmp, ".");
+		ptr = strtok(NULL, "."); // discard the first
+		for (j=0;j<3;j++) {
+			if (j==0)
+				mac_parts[j] = 0x7F & atoi(ptr);
+			else
+				mac_parts[j] = atoi(ptr);
+		}
+		sprintf(mac, "01:00:5E:%02x:%02x:%02x", mac_parts[0], mac_parts[1],
+				mac_parts[2]);
+		add_arp_entry(ip_str, mac);
+		assert(CFG.multicast_cnt <= MAX_MULTICAST_IPS);
+	}
+	return 0;
+
+}
+#endif
+
+#ifdef WITH_RAFT
+static int parse_raft_peers(void)
+{
+	const config_setting_t *raft = NULL, *entry = NULL;
+	int i;
+	const char *ip = NULL;
+	uint32_t ip_int;
+
+	raft = config_lookup(&cfg, "raft");
+	if (!raft)
+		return -1;
+
+	CFG.raft_peers_cnt = config_setting_length(raft);
+	CFG.raft_peers =  malloc(sizeof(struct r2p2_raft_peer)*CFG.raft_peers_cnt);
+	for (i = 0; i < CFG.raft_peers_cnt; ++i) {
+		int port = -1;
+		printf("Found one peer: %d\n", i);
+		entry = config_setting_get_elem(raft, i);
+		config_setting_lookup_string(entry, "ip", &ip);
+		config_setting_lookup_int(entry, "port", &port);
+		if (!ip || (port < 0)) {
+			fprintf(stderr, "Error parsing raft peer\n");
+			return -1;
+		}
+		CFG.raft_peers[i].id = i;
+		inet_pton(AF_INET, ip, &ip_int);
+		CFG.raft_peers[i].host.ip = be32toh(ip_int);
+		CFG.raft_peers[i].host.port = port;
+	}
+	return 0;
+}
 #endif
 
 int parse_config(void)
@@ -138,6 +214,16 @@ int parse_config(void)
 	}
 #endif
 
+#ifdef WITH_RAFT
+	// Parse raft peers if any
+	ret = parse_raft_peers();
+	if (ret) {
+		fprintf(stderr, "no Raft peers found\n");
+		CFG.raft_peers_cnt = 0;
+		CFG.raft_peers = NULL;
+	}
+#endif
+
 #ifdef LINUX
 	return 0;
 #else
@@ -161,6 +247,8 @@ int parse_config(void)
 		config_destroy(&cfg);
 		return ret;
 	}
+
+	parse_multicast();
 #endif
 
 	return 0;

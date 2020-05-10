@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -23,63 +23,63 @@
  */
 
 #include <assert.h>
-#include <inttypes.h>
-#include <stdbool.h>
 #include <stdio.h>
-
-// Must be before all DPDK includes
-#include <rte_config.h>
-
-#include <rte_common.h>
-#include <rte_eal.h>
-#include <rte_ethdev.h>
-#include <rte_mempool.h>
+#include <string.h>
+#include <sys/time.h>
 
 #include <dp/api.h>
 #include <dp/core.h>
-#ifdef SHOULD_TRACE
-#include <dp/queue_trace.h>
-#endif
-#include <net/net.h>
+
+#include <r2p2/api.h>
 #include <r2p2/api-internal.h>
-#ifdef WITH_RAFT
-#include <r2p2/hovercraft.h>
-#endif
 
-RTE_DEFINE_PER_LCORE(int, queue_id);
-RTE_DEFINE_PER_LCORE(struct wnd_stats *, rtcl_stats);
+#include <rte_eal.h>
 
-int core_main(void *arg)
+#define MAX_REPLY 1024*1024
+char payload[MAX_REPLY];
+
+static void synthetic_recv_fn(long handle, struct iovec *iov,
+							  __attribute__((unused)) int iovcnt)
 {
-#ifdef SHOULD_TRACE
-	trace_init();
-#endif
-	int q_id = (int)(long)arg;
+	long *to_return;
+	struct iovec local_iov[1];
 
-	printf("Hello from core : %u with queue %d\n", rte_lcore_id(), q_id);
-	RTE_PER_LCORE(queue_id) = q_id;
+	to_return = (long *)iov->iov_base;
 
-	/* Init run-to-completion stats */
-	RTE_PER_LCORE(rtcl_stats) = wnd_stats_init(RTC_WND);
+	// reply
+	assert(*to_return <= MAX_REPLY);
+	local_iov[0].iov_base = payload;
+	local_iov[0].iov_len = *to_return;
 
-	/* initialise network per core */
-	net_init_per_core();
+	r2p2_send_response(handle, local_iov, 1);
+}
 
-#ifdef WITH_RAFT
-	if (q_id == 0)
-		app_main();
-	else
-		raft_worker();
-#else
-	app_main();
-#endif
+int app_init(__attribute__((unused)) int argc,
+			 __attribute__((unused)) char **argv)
+{
+	printf("Hello r2p2lib synthetic server \n");
 
-#ifdef SHOULD_TRACE
-#ifdef CONN_TIME
-	tcp_dump_conn_stats();
-#endif
-	trace_end();
-#endif
+	if (r2p2_init(8000)) { // this port number is not used
+		printf("Error initialising\n");
+		return -1;
+	}
+
+	memset(payload, 'x', MAX_REPLY);
+	r2p2_set_recv_cb(synthetic_recv_fn);
 
 	return 0;
+}
+
+void app_main(void)
+{
+	if (r2p2_init_per_core(RTE_PER_LCORE(queue_id), rte_lcore_count())) {
+		printf("Error initialising per core\n");
+		exit(1);
+	}
+
+	do {
+		r2p2_poll();
+	} while (!force_quit);
+
+	return;
 }
