@@ -49,7 +49,38 @@ static __thread struct fixed_linked_list pending_client_pairs = {0};
 static __thread struct fixed_linked_list pending_server_pairs = {0};
 static __thread struct iovec to_app_iovec[0xFF]; // change this to 0xFF;
 
-static struct r2p2_client_pair *alloc_client_pair(void)
+static __thread struct r2p2_eo_client_info eo_client_info = {0}; // possible improvement: alloc only for client
+
+#if DEBUG
+static void print_cp(void* __cp) {
+  struct r2p2_client_pair* cp = (struct r2p2_client_pair*) __cp;
+  if (cp->eo_info)
+    printf("{req_id: %d, retries: %d}", cp->request.req_id, cp->eo_info->req_resent);
+}
+
+static void print_sp(void* __sp) {
+  struct r2p2_server_pair* sp = (struct r2p2_server_pair*) __sp;
+  if (sp->eo_info)
+    printf("{req_id: %d, retries: %d, req_received: %d}", sp->request.req_id, sp->eo_info->req_resent, sp->eo_info->req_received);
+}
+
+static void print_linked_list(const char* str, struct fixed_linked_list *ll, void(*print_fun)(void*)) {
+  printf("%s: ", str);
+  for (struct fixed_obj *obj = ll->head; obj; obj = obj->next) {
+    print_fun(obj->elem);
+  }
+  printf("\n");
+}
+
+void __debug_dump()
+{
+  if (pending_client_pairs.head != NULL) print_linked_list("cp", &pending_client_pairs, print_cp);
+  else if (pending_server_pairs.head != NULL) print_linked_list("sp", &pending_server_pairs, print_sp);
+  else printf("empty debug\n");
+}
+#endif
+
+static struct r2p2_client_pair *alloc_client_pair(int with_eo_info)
 {
 	struct r2p2_client_pair *cp;
 
@@ -57,6 +88,11 @@ static struct r2p2_client_pair *alloc_client_pair(void)
 	assert(cp);
 
 	bzero(cp, sizeof(struct r2p2_client_pair));
+
+	if (with_eo_info) {
+	  cp->eo_info = malloc(sizeof(struct r2p2_cp_exct_once_info)); // TODO: use alloc_object
+	  assert(cp->eo_info);
+	}
 
 	return cp;
 }
@@ -85,10 +121,15 @@ static void free_client_pair(struct r2p2_client_pair *cp)
 	if (cp->on_free)
 		cp->on_free(cp->impl_data);
 
+	if (cp->eo_info) {
+	  free(cp->eo_info); // TODO: use free_object
+	  cp->eo_info = NULL;
+	}
+
 	free_object(cp);
 }
 
-static struct r2p2_server_pair *alloc_server_pair(void)
+static struct r2p2_server_pair *alloc_server_pair(int with_eo_info)
 {
 	struct r2p2_server_pair *sp;
 
@@ -96,6 +137,11 @@ static struct r2p2_server_pair *alloc_server_pair(void)
 	assert(sp);
 
 	bzero(sp, sizeof(struct r2p2_server_pair));
+
+  if (with_eo_info) {
+    sp->eo_info = malloc(sizeof(struct r2p2_sp_exct_once_info)); // TODO: use alloc_object
+    assert(sp->eo_info);
+  }
 
 	return sp;
 }
@@ -119,6 +165,12 @@ static void free_server_pair(struct r2p2_server_pair *sp)
 		gb = get_buffer_next(gb);
 	}
 #endif
+
+  if (sp->eo_info) {
+    sp_free_timer(sp);
+    free(sp->eo_info); // TODO: use free_object
+    sp->eo_info = NULL;
+  }
 
 	free_object(sp);
 }
@@ -195,8 +247,8 @@ static int prepare_to_app_iovec(struct r2p2_msg *msg)
 		buf = get_buffer_payload(gb);
 		assert(buf);
 		len = get_buffer_payload_size(gb);
-		to_app_iovec[iovcnt].iov_base = ((struct r2p2_header *)buf) + 1;
-		to_app_iovec[iovcnt++].iov_len = len - sizeof(struct r2p2_header);
+		to_app_iovec[iovcnt].iov_base = buf + get_header_size(buf);
+		to_app_iovec[iovcnt++].iov_len = len - get_header_size(buf);
 		gb = get_buffer_next(gb);
 		assert(iovcnt < 0xFF);
 	}
@@ -236,10 +288,12 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 					  uint8_t req_type, uint8_t policy, uint16_t req_id)
 {
 	unsigned int iov_idx, bufferleft, copied, tocopy, buffer_cnt, total_payload,
-		single_packet_msg, is_first, should_small_first;
+		single_packet_msg, is_first, should_small_first, header_size;
 	struct r2p2_header *r2p2h;
 	generic_buffer gb, new_gb;
 	char *target, *src;
+
+  header_size =  MIN_HEADER_SIZE;
 
 	// Compute the total payload
 	total_payload = 0;
@@ -266,12 +320,10 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 			// Set the last buffer to full size
 			if (gb) {
 				if (is_first && should_small_first) {
-					set_buffer_payload_size(gb, MIN_PAYLOAD_SIZE +
-													sizeof(struct r2p2_header));
+					set_buffer_payload_size(gb, MIN_PAYLOAD_SIZE + header_size);
 					is_first = 0;
 				} else
-					set_buffer_payload_size(gb, PAYLOAD_SIZE +
-													sizeof(struct r2p2_header));
+					set_buffer_payload_size(gb, PAYLOAD_SIZE + header_size);
 			}
 			new_gb = get_buffer();
 			assert(new_gb);
@@ -284,14 +336,15 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 				bufferleft = PAYLOAD_SIZE;
 			// FIX the header
 			r2p2h = (struct r2p2_header *)target;
-			bzero(r2p2h, sizeof(struct r2p2_header));
+      bzero(r2p2h, header_size);
+
 			r2p2h->magic = MAGIC;
 			r2p2h->rid = req_id;
-			r2p2h->header_size = sizeof(struct r2p2_header);
+			r2p2h->header_size = header_size;
 			r2p2h->type_policy = (req_type << 4) | (0x0F & policy);
 			r2p2h->p_order = buffer_cnt++;
 			r2p2h->flags = 0;
-			target += sizeof(struct r2p2_header);
+			target += header_size;
 		}
 		src = iov[iov_idx].iov_base;
 		tocopy = min(bufferleft, iov[iov_idx].iov_len - copied);
@@ -306,8 +359,7 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	}
 
 	// Set the len of the last buffer
-	set_buffer_payload_size(gb, PAYLOAD_SIZE + sizeof(struct r2p2_header) -
-									bufferleft);
+	set_buffer_payload_size(gb, PAYLOAD_SIZE + header_size - bufferleft);
 
 	// Fix the header of the first and last packet
 	r2p2h = (struct r2p2_header *)get_buffer_payload(msg->head_buffer);
@@ -376,6 +428,11 @@ static void handle_response(generic_buffer gb, int len,
 	cp->reply.sender = *source;
 
 	switch(get_msg_type(r2p2h)) {
+    case RESPONSE_EXCT_ONCE:
+      // todo: handle already received response
+	    assert(cp->eo_info);
+	    send_eo_ack(cp);
+  	  // no break, continue like regular response
 		case RESPONSE_MSG:
 			assert(cp->state == R2P2_W_RESPONSE);
 			set_buffer_payload_size(gb, len);
@@ -427,9 +484,9 @@ static void handle_response(generic_buffer gb, int len,
 		case ACK_MSG:
 			// Send the rest packets
 			assert(cp->state == R2P2_W_ACK);
-			if (len != (sizeof(struct r2p2_header) + 3))
+			if (len != (MIN_HEADER_SIZE + 3))
 				printf("ACK msg size is %d\n", len);
-			assert(len == (sizeof(struct r2p2_header) + 3));
+			assert(len == (MIN_HEADER_SIZE + 3));
 			free_buffer(gb);
 #ifdef LINUX
 			rest_to_send = get_buffer_next(cp->request.head_buffer);
@@ -454,13 +511,31 @@ static void handle_request(generic_buffer gb, int len,
 						   struct r2p2_header *r2p2h,
 						   struct r2p2_host_tuple *source)
 {
+  printf("handle_request start: "); __debug_dump();
 	struct r2p2_server_pair *sp;
 	uint16_t req_id;
 	char ack_payload[] = "ACK";
 	struct iovec ack;
 	struct r2p2_msg ack_msg = {0};
+  int exct_once;
 
+  exct_once = get_msg_type(r2p2h) == REQUEST_EXCT_ONCE;
 	req_id = r2p2h->rid;
+
+	if (exct_once) {
+	  sp = find_in_pending_server_pairs(req_id, source);
+	  if (sp != NULL) {
+      assert(sp->eo_info);
+      if (is_first(r2p2h)) {
+        sp->eo_info->req_received++;
+//        buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+        eo_try_garbage_collect(sp);
+      }
+      free_buffer(gb);
+      return;
+	  }
+	}
+
 	if (is_first(r2p2h)) {
 		/*
 		 * FIXME
@@ -468,12 +543,18 @@ static void handle_request(generic_buffer gb, int len,
 		 * src ip port is already there
 		 * remove before starting the new one
 		 */
-		sp = alloc_server_pair();
+		sp = alloc_server_pair(exct_once);
 		assert(sp);
 		sp->request.sender = *source;
 		sp->request.req_id = req_id;
 		sp->request_expected_packets = r2p2h->p_order;
 		sp->request_received_packets = 1;
+		if (exct_once) {
+		  sp->eo_info->req_received = 1;
+		  sp->eo_info->req_resent = ACK_NOT_RECEIVED;
+		  sp->eo_info->reply_resent = 0;
+		  sp_get_timer(sp);
+		}
 
 		if (!should_keep_req(sp)) {
 			set_buffer_payload_size(gb, len);
@@ -495,6 +576,9 @@ static void handle_request(generic_buffer gb, int len,
 #ifdef LINUX
 			free_buffer(ack_msg.head_buffer);
 #endif
+		} else if (exct_once) {
+      // add to pending request
+      add_to_pending_server_pairs(sp);
 		}
 	} else {
 		// find in pending msgs
@@ -536,11 +620,14 @@ void handle_incoming_pck(generic_buffer gb, int len,
 	struct r2p2_header *r2p2h;
 	char *buf;
 
-	if ((unsigned)len < sizeof(struct r2p2_header))
+	if ((unsigned)len < MIN_HEADER_SIZE)
 		printf("I received %d\n", len);
-	assert((unsigned)len >= sizeof(struct r2p2_header));
-	buf = get_buffer_payload(gb);
-	r2p2h = (struct r2p2_header *)buf;
+	assert((unsigned)len >= MIN_HEADER_SIZE);
+
+  buf = get_buffer_payload(gb);
+  r2p2h = (struct r2p2_header *)buf;
+  printf("\nReceived packet from %d:%d, seq=%d, len=%d\n", source->ip, source->port, r2p2h->rid, len);
+//  assert(r2p2h->header_size == (get_msg_type(r2p2h) == REQUEST_EXCT_ONCE ? sizeof(struct r2p2_header) : MIN_HEADER_SIZE));
 
 	if (is_response(r2p2h))
 #ifdef WITH_TIMESTAMPING
@@ -548,6 +635,8 @@ void handle_incoming_pck(generic_buffer gb, int len,
 #else
 		handle_response(gb, len, r2p2h, source, local_host);
 #endif
+	else if (is_ack_exct_once(r2p2h))
+	  handle_ack_eo(gb, len, r2p2h, source);
 	else
 		handle_request(gb, len, r2p2h, source);
 }
@@ -568,17 +657,33 @@ int r2p2_backend_init_per_core(void)
 
 void timer_triggered(struct r2p2_client_pair *cp)
 {
-	struct fixed_obj *fo = get_object_meta(cp);
-	if (!fo->taken)
-		return;
+  struct fixed_obj *fo = get_object_meta(cp);
+  if (!fo->taken)
+    return;
 
-	assert(cp->ctx->timeout_cb);
-	cp->ctx->timeout_cb(cp->ctx->arg);
-	//printf("Timer triggered: received packets %d expected %d\n",
-	//		cp->reply_received_packets, cp->reply_expected_packets);
+  if (cp->eo_info) {
+    if (cp->eo_info->req_resent < EO_MAX_RETRY_REQUEST) {
+	    printf("EO timeout, retry\n");
+      cp_restart_timer(cp, cp->ctx->timeout);
+      buf_list_send(cp->request.head_buffer, cp->ctx->destination, cp->impl_data);
+	  } else {
+      cp->ctx->timeout_cb(cp->ctx->arg);
+	    // Flush the data
+      remove_from_pending_client_pairs(cp);
+      free_client_pair(cp);
+      return;
+    }
+    cp->eo_info->req_resent++;
 
-	remove_from_pending_client_pairs(cp);
-	free_client_pair(cp);
+	} else {
+    assert(cp->ctx->timeout_cb);
+    cp->ctx->timeout_cb(cp->ctx->arg);
+    //printf("Timer triggered: received packets %d expected %d\n",
+    //		cp->reply_received_packets, cp->reply_expected_packets);
+
+    remove_from_pending_client_pairs(cp);
+    free_client_pair(cp);
+  }
 }
 
 /*
@@ -589,15 +694,27 @@ void r2p2_send_response(long handle, struct iovec *iov, int iovcnt)
 	struct r2p2_server_pair *sp;
 
 	sp = (struct r2p2_server_pair *)handle;
-	r2p2_prepare_msg(&sp->reply, iov, iovcnt, RESPONSE_MSG, FIXED_ROUTE,
-					 sp->request.req_id);
-	buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+
+	printf("send response for %d\n", sp->request.req_id);
+
+	int exct_once = sp->eo_info != NULL;
+
+  r2p2_prepare_msg(&sp->reply, iov, iovcnt,
+                   exct_once ? RESPONSE_EXCT_ONCE : RESPONSE_MSG,
+                   FIXED_ROUTE, sp->request.req_id);
+
+  buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
 	// Notify router
 	router_notify();
 
-	remove_from_pending_server_pairs(sp);
-	free_server_pair(sp);
+	if (!exct_once) {
+    remove_from_pending_server_pairs(sp);
+    free_server_pair(sp);
+	} else {
+	  sp->eo_info->reply_resent = 0;
+	  sp_restart_timer(sp, EO_TO_REPLY);
+	}
 }
 
 void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
@@ -605,8 +722,9 @@ void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
 	generic_buffer second_buffer;
 	struct r2p2_client_pair *cp;
 	uint16_t rid;
+  uint8_t req_type;
 
-	cp = alloc_client_pair();
+	cp = alloc_client_pair(is_exct_once(ctx));
 	assert(cp);
 	cp->ctx = ctx;
 
@@ -615,10 +733,19 @@ void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
 		return;
 	}
 
-	rid = rand();
-	r2p2_prepare_msg(&cp->request, iov, iovcnt, REQUEST_MSG,
-					 ctx->routing_policy, rid);
-	cp->state = cp->request.head_buffer == cp->request.tail_buffer
+	if (is_exct_once(ctx)) {
+	  cp->eo_info->req_resent = 0;
+    rid = eo_client_info.next_seq++;
+    req_type = REQUEST_EXCT_ONCE;
+    printf("send exct once request. rid=%d\n", rid);
+  } else {
+    rid = rand();
+    req_type = REQUEST_MSG;
+  }
+
+  r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type,
+          ctx->routing_policy, rid);
+  cp->state = cp->request.head_buffer == cp->request.tail_buffer
 					? R2P2_W_RESPONSE
 					: R2P2_W_ACK;
 
@@ -651,4 +778,76 @@ void r2p2_set_recv_cb(recv_fn fn)
 void r2p2_set_app_flow_control_fn(app_flow_control fn)
 {
 	afc_fn = fn;
+}
+
+void use_exct_once(struct r2p2_ctx *ctx)
+{
+  ctx->routing_policy |= EXCT_ONCE_FLAG;
+}
+
+void send_eo_ack(struct r2p2_client_pair *cp)
+{
+  assert(cp->eo_info);
+  struct iovec ack;
+  struct r2p2_msg ack_msg = {0};
+
+  ack.iov_base = &(cp->eo_info->req_resent);
+  ack.iov_len = sizeof(uint16_t);
+  r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_EXCT_ONCE, FIXED_ROUTE,
+                   cp->request.req_id);
+  buf_list_send(ack_msg.head_buffer, &cp->reply.sender, cp->impl_data);
+#ifdef LINUX
+  free_buffer(ack_msg.head_buffer);
+#endif
+}
+
+void handle_ack_eo(generic_buffer gb, int len,
+                   struct r2p2_header *r2p2h,
+                   struct r2p2_host_tuple *source)
+{
+  struct r2p2_server_pair *sp;
+  uint16_t nb_retries;
+  assert(len == r2p2h->header_size + sizeof(uint16_t));
+
+  nb_retries = *(uint16_t *) (get_buffer_payload(gb) + r2p2h->header_size);
+  printf("Received ack from %d for %d with %d retries\n", source->port, r2p2h->rid, nb_retries);
+
+  sp = find_in_pending_server_pairs(r2p2h->rid, source);
+  assert(sp && sp->eo_info);
+  sp->eo_info->req_resent = nb_retries;
+  if (!eo_try_garbage_collect(sp)) {
+    sp_restart_timer(sp, EO_TO_NETWORK_FLUSH);
+  }
+}
+
+int eo_try_garbage_collect(struct r2p2_server_pair *sp)
+{
+  assert(sp != NULL || sp->eo_info != NULL);
+
+  if (sp->eo_info->req_received > sp->eo_info->req_resent) {
+    printf("GC early for req %d, received %d/%d\n", sp->request.req_id, sp->eo_info->req_received, sp->eo_info->req_resent);
+    remove_from_pending_server_pairs(sp);
+    free_server_pair(sp);
+    return 1;
+  } else return 0;
+
+}
+
+void sp_timer_triggered(struct r2p2_server_pair *sp)
+{
+  int timeout;
+  assert(sp && sp->eo_info);
+
+  if (sp->eo_info->req_resent == ACK_NOT_RECEIVED && sp->eo_info->reply_resent < EO_MAX_RETRY_REPLY) {
+    printf("Retransmits based on timeout "); __debug_dump();
+    buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+    timeout = ++sp->eo_info->reply_resent == EO_MAX_RETRY_REPLY ?
+            EO_TO_NETWORK_FLUSH : EO_TO_REPLY;
+    sp_restart_timer(sp, timeout);
+  } else {
+    printf("GC by timeout for req %d, received %d/%d\n", sp->request.req_id, sp->eo_info->req_received, sp->eo_info->req_resent);
+    remove_from_pending_server_pairs(sp);
+    free_server_pair(sp);
+  }
+
 }

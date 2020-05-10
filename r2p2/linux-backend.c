@@ -22,16 +22,22 @@
  * SOFTWARE.
  */
 
-#include <arpa/inet.h>
 #include <assert.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/epoll.h>
+
+# if __APPLE__
+#include "linuxsys4mac.h"
+#else
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <sys/timerfd.h>
+#include <arpa/inet.h>
+#endif
+
 #include <unistd.h>
 
 #include <r2p2/cfg.h>
@@ -47,6 +53,7 @@ struct sockaddr_in router_addr;
 
 static __thread int efd;
 static __thread struct socket_pool sp;
+static __thread struct timer_pool tp;
 static __thread struct fixed_mempool *buf_pool;
 
 #ifdef WITH_TIMESTAMPING
@@ -100,6 +107,14 @@ int r2p2_init_per_core(int core_id, int core_count)
 		printf("Error creating epoll fd\n");
 		return -1;
 	}
+
+#if DEBUG
+  event.events = EPOLLIN;
+	event.data.fd = 0;
+  ret = epoll_ctl(efd, EPOLL_CTL_ADD, 0, &event);
+	if (ret)
+		return -1;
+#endif
 
 	// Add the server socket
 	event.events = EPOLLIN;
@@ -178,6 +193,25 @@ int r2p2_init_per_core(int core_id, int core_count)
 		}
 	}
 
+	tp.count = 0;
+	tp.idx = 0;
+	// Create the free timers
+  for (i = 0; i < TIMERPOOL_SIZE; i++) {
+    tfd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK);
+
+    tp.timers[i].fd = tfd;
+    tp.timers[i].taken = 0;
+    tp.timers[i].data = NULL;
+
+    event.events = EPOLLIN;
+    event.data.ptr = (void *)&(tp.timers[i]);
+    ret = epoll_ctl(efd, EPOLL_CTL_ADD, tfd, &event);
+    if (ret) {
+      perror("epoll_ctl");
+      return -1;
+    }
+  }
+
 	return 0;
 }
 
@@ -202,6 +236,24 @@ static struct r2p2_socket *get_socket(void)
 	return res;
 }
 
+static struct free_timer *get_timer(void)
+{
+  struct free_timer *res;
+  uint32_t idx;
+
+  if (tp.count >= TIMERPOOL_SIZE)
+    return NULL;
+
+  while (tp.timers[tp.idx++ & (TIMERPOOL_SIZE - 1)].taken)
+    ;
+  idx = (tp.idx - 1) & (TIMERPOOL_SIZE - 1);
+  res = &tp.timers[idx];
+  tp.timers[idx].taken = 1;
+  tp.count++;
+
+  return res;
+}
+
 static int __disarm_timer(int timerfd)
 {
 	struct itimerspec ts = {0};
@@ -222,6 +274,7 @@ static void free_socket(struct r2p2_socket *s)
 
 static void linux_on_client_pair_free(void *data)
 {
+  printf("Free client pair\n");
 	struct r2p2_socket *sock = (struct r2p2_socket *)data;
 	__disarm_timer(sock->tfd);
 	free_socket(sock);
@@ -233,6 +286,32 @@ static void handle_timer_for_socket(struct r2p2_socket *s)
 	__disarm_timer(s->tfd);
 	assert(s->taken);
 	timer_triggered(s->cp);
+}
+
+static void handle_free_timer(struct free_timer *ft) {
+  assert(ft && ft->data && ft->taken);
+  __disarm_timer(ft->fd);
+  sp_timer_triggered((struct r2p2_server_pair *)ft->data);
+}
+
+void sp_get_timer(struct r2p2_server_pair *sp) {
+  struct free_timer *t;
+  t = get_timer();
+  if (t == NULL) {
+    perror("Could not allocate free timer");
+  }
+  t->data = sp;
+  sp->eo_info->timer = t;
+}
+
+void sp_free_timer(struct r2p2_server_pair *sp) {
+  struct free_timer *t = sp->eo_info->timer;
+  if (t) {
+    t->taken = 0;
+    t->data = NULL;
+    __disarm_timer(t->fd);
+    sp->eo_info->timer = NULL;
+  }
 }
 
 /*
@@ -339,7 +418,7 @@ int r2p2_init(int listen_port)
 void r2p2_poll(void)
 {
 	struct epoll_event events[MAX_EVENTS];
-	int ready, i, recvlen, is_timer_event;
+	int ready, i, recvlen, is_socket_timer_event, is_free_timer_event;
 	struct r2p2_socket *s;
 	generic_buffer gb;
 	void *buf, *event_arg;
@@ -353,12 +432,29 @@ void r2p2_poll(void)
 
 	ready = epoll_wait(efd, events, MAX_EVENTS, 0);
 	for (i = 0; i < ready; i++) {
-		event_arg = (struct r2p2_socket *)events[i].data.ptr;
-		assert(event_arg);
+
+#if DEBUG
+    if (events[i].data.fd == 0) {
+      int c;
+      while ((c = getchar()) != '\n' && c != EOF) { }
+      __debug_dump();
+      continue;
+    }
+#endif
+
+    event_arg = (struct r2p2_socket *)events[i].data.ptr;
+    assert(event_arg);
 		if (events[i].events & EPOLLIN) {
-			is_timer_event =
-				(unsigned long)event_arg % sizeof(struct r2p2_socket);
-			if (is_timer_event) {
+      is_socket_timer_event =
+              (unsigned long) event_arg % sizeof(struct r2p2_socket);
+      is_free_timer_event =
+              (void *) tp.timers <= events[i].data.ptr &&
+              events[i].data.ptr < (void *) (tp.timers + TIMERPOOL_SIZE);
+
+      if (is_free_timer_event) {
+        handle_free_timer((struct free_timer *)events[i].data.ptr);
+
+      } else if (is_socket_timer_event) {
 				assert((unsigned long)event_arg % sizeof(struct r2p2_socket) ==
 					   4);
 				s = container_of(event_arg, struct r2p2_socket, tfd);
@@ -478,6 +574,42 @@ int disarm_timer(void *timer)
 {
 	int tfd = (int)(long)timer;
 	return __disarm_timer(tfd);
+}
+
+static void __restart_timer(int tfd, long timeout) {
+  struct itimerspec ts;
+
+  ts.it_interval.tv_sec = 0;
+  ts.it_interval.tv_nsec = 0;
+  ts.it_value.tv_sec = timeout / 1000000;
+  ts.it_value.tv_nsec = (timeout % 1000000) * 1000;
+
+  if (timerfd_settime(tfd, 0, &ts, NULL) < 0) {
+    perror("Error resetting timer");
+    assert(0);
+  }
+}
+
+
+int cp_restart_timer(struct r2p2_client_pair *cp, long timeout)
+{
+  struct r2p2_socket *s;
+
+  s = (struct r2p2_socket *)cp->impl_data;
+  assert(s->taken && s->cp == cp);
+  __restart_timer(s->tfd, timeout);
+  cp->timer = (void *)(long)s->tfd;
+  return 0;
+}
+
+int sp_restart_timer(struct r2p2_server_pair *sp, long timeout) {
+  struct free_timer *timer;
+  assert(sp && sp->eo_info && sp->eo_info->timer);
+
+  timer = (struct free_timer *)sp->eo_info->timer;
+  assert(timer->data == sp && timer->taken);
+  __restart_timer(timer->fd, timeout);
+  return 0;
 }
 
 void router_notify(void)
