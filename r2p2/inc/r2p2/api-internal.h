@@ -238,8 +238,9 @@ void handle_incoming_pck(generic_buffer gb, int len,
 #endif
 void timer_triggered(struct r2p2_client_pair *cp);
 void sp_timer_triggered(struct r2p2_server_pair *sp);
-/* Exposed only for lancet */
-void forward_request(struct r2p2_server_pair *sp);  // FIXME 
+
+void forward_request(struct r2p2_server_pair *sp);
+
 struct r2p2_server_pair *alloc_server_pair(void);
 void free_server_pair(struct r2p2_server_pair *sp);
 void r2p2_msg_add_payload(struct r2p2_msg *msg, generic_buffer gb);
@@ -260,8 +261,6 @@ int cp_restart_timer(struct r2p2_client_pair *cp, long timeout);
 void sp_get_timer(struct r2p2_server_pair *sp);
 int sp_restart_timer(struct r2p2_server_pair *sp, long timeout);
 void sp_free_timer(struct r2p2_server_pair *sp);
-
-void router_notify(void);
 
 /*
  * Exactly Once specific

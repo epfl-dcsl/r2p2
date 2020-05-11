@@ -67,8 +67,6 @@ static __thread struct fixed_linked_list pending_server_pairs = {0};
 static __thread struct iovec to_app_iovec[0xFF];
 static __thread uint16_t rid = 0;
 
-static __thread struct r2p2_eo_client_info eo_client_info = {0}; // possible improvement: alloc only for client
-
 #if DEBUG
 static void print_cp(void* __cp) {
   struct r2p2_client_pair* cp = (struct r2p2_client_pair*) __cp;
@@ -147,7 +145,7 @@ static void free_client_pair(struct r2p2_client_pair *cp)
 	free_object(cp);
 }
 
-static struct r2p2_server_pair *alloc_server_pair(int with_eo_info)
+static struct r2p2_server_pair *__alloc_server_pair(int with_eo_info)
 {
 	struct r2p2_server_pair *sp;
 
@@ -156,13 +154,18 @@ static struct r2p2_server_pair *alloc_server_pair(int with_eo_info)
 
 	bzero(sp, sizeof(struct r2p2_server_pair));
 
-  if (with_eo_info) {
-    sp->eo_info = malloc(sizeof(struct r2p2_sp_exct_once_info)); // TODO: use alloc_object
-    assert(sp->eo_info);
-  }
+	if (with_eo_info) {
+		sp->eo_info = malloc(sizeof(struct r2p2_sp_exct_once_info)); // TODO: use alloc_object
+		assert(sp->eo_info);
+	}
 
 	return sp;
 }
+
+struct r2p2_server_pair *alloc_server_pair() {
+	return __alloc_server_pair(0);
+}
+
 
 void free_server_pair(struct r2p2_server_pair *sp)
 {
@@ -308,13 +311,13 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 					  uint8_t req_type, uint8_t policy, uint16_t req_id)
 {
 	unsigned int iov_idx, buffer_cnt, total_payload, single_packet_msg,
-				 is_first, should_small_first;
+				 is_first, should_small_first, header_size;
 	int i, bufferleft, copied, tocopy;
 	struct r2p2_header *r2p2h;
 	generic_buffer gb, new_gb;
 	char *target, *src;
 
-  header_size =  MIN_HEADER_SIZE;
+	header_size =  MIN_HEADER_SIZE;
 
 	// Compute the total payload
 	msg->req_id = req_id;
@@ -542,24 +545,24 @@ static void handle_request(generic_buffer gb, int len,
 	char ack_payload[] = "ACK";
 	struct iovec ack;
 	struct r2p2_msg ack_msg = {0};
-  int exct_once;
+	int exct_once;
 	int was_in_pending_sp = 0;
 
-  exct_once = get_msg_type(r2p2h) == REQUEST_EXCT_ONCE;
+	exct_once = get_msg_type(r2p2h) == REQUEST_EXCT_ONCE;
 	req_id = r2p2h->rid;
 
 	if (exct_once) {
-	  sp = find_in_pending_server_pairs(req_id, source);
-	  if (sp != NULL) {
-      assert(sp->eo_info);
-      if (is_first(r2p2h)) {
-        sp->eo_info->req_received++;
-//        buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
-        eo_try_garbage_collect(sp);
-      }
-      free_buffer(gb);
-      return;
-	  }
+		sp = find_in_pending_server_pairs(req_id, source);
+		if (sp != NULL) {
+			assert(sp->eo_info);
+			if (is_first(r2p2h)) {
+				sp->eo_info->req_received++;
+				// buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+				eo_try_garbage_collect(sp);
+			}
+			free_buffer(gb);
+			return;
+		}
 	}
 
 	if (is_first(r2p2h)) {
@@ -569,17 +572,17 @@ static void handle_request(generic_buffer gb, int len,
 		 * src ip port is already there
 		 * remove before starting the new one
 		 */
-		sp = alloc_server_pair(exct_once);
+		sp = __alloc_server_pair(exct_once);
 		assert(sp);
 		sp->request.sender = *source;
 		sp->request.req_id = req_id;
 		sp->request_expected_packets = r2p2h->p_order;
 		sp->request_received_packets = 1;
 		if (exct_once) {
-		  sp->eo_info->req_received = 1;
-		  sp->eo_info->req_resent = ACK_NOT_RECEIVED;
-		  sp->eo_info->reply_resent = 0;
-		  sp_get_timer(sp);
+			sp->eo_info->req_received = 1;
+			sp->eo_info->req_resent = ACK_NOT_RECEIVED;
+			sp->eo_info->reply_resent = 0;
+			sp_get_timer(sp);
 		}
 
 		/* Flow control only request messages, not Raft reqs */
@@ -600,14 +603,16 @@ static void handle_request(generic_buffer gb, int len,
 				// send ACK
 				ack.iov_base = ack_payload;
 				ack.iov_len = 3;
-				r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_MSG, FIXED_ROUTE, req_id);
+				r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_MSG, FIXED_ROUTE,
+								 req_id);
 				buf_list_send(ack_msg.head_buffer, source, NULL);
 #ifdef LINUX
 				free_buffer(ack_msg.head_buffer);
 #endif
-		} else if (exct_once) {
-      // add to pending request
-      add_to_pending_server_pairs(sp);
+			} else if (exct_once) {
+				// add to pending request
+				add_to_pending_server_pairs(sp);
+			}
 		}
 	} else {
 		// find in pending msgs
@@ -794,22 +799,23 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 	} else {
 
 		r2p2_prepare_msg(&sp->reply, iov, iovcnt,
-	                   exct_once ? RESPONSE_EXCT_ONCE : RESPONSE_MSG,
-	                   FIXED_ROUTE, sp->request.req_id);
+						 exct_once ? RESPONSE_EXCT_ONCE : RESPONSE_MSG,
+						 FIXED_ROUTE, sp->request.req_id);
 
-	  buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
 		// Notify router not for Raft requests
 		if (!is_raft_msg(r2p2h))
 			router_notify(sp->request.sender.ip, sp->request.sender.port,
-					sp->request.req_id);
+						  sp->request.req_id);
 
-	if (!exct_once) {
-    remove_from_pending_server_pairs(sp);
-    free_server_pair(sp);
-	} else {
-	  sp->eo_info->reply_resent = 0;
-	  sp_restart_timer(sp, EO_TO_REPLY);
+		if (!exct_once) {
+			//    remove_from_pending_server_pairs(sp);
+			free_server_pair(sp);
+		} else {
+			sp->eo_info->reply_resent = 0;
+			sp_restart_timer(sp, EO_TO_REPLY);
+		}
 	}
 }
 
@@ -838,8 +844,6 @@ static inline void __r2p2_send_req(struct iovec *iov, int iovcnt,
 {
 	generic_buffer second_buffer;
 	struct r2p2_client_pair *cp;
-	uint16_t rid;
-  uint8_t req_type;
 
 	cp = alloc_client_pair(is_exct_once(ctx));
 	assert(cp);
@@ -850,19 +854,18 @@ static inline void __r2p2_send_req(struct iovec *iov, int iovcnt,
 		return;
 	}
 
-	if (is_exct_once(ctx)) {
-	  cp->eo_info->req_resent = 0;
-    rid = eo_client_info.next_seq++;
-    req_type = REQUEST_EXCT_ONCE;
-    printf("send exct once request. rid=%d\n", rid);
-  } else {
-    rid = rand();
-    req_type = REQUEST_MSG;
-  }
+	// FIXME: Make sure the rid is available
+	//rid = rand();
+	rid++;
 
-  r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type,
+	if (req_type == REQUEST_EXCT_ONCE) {
+		cp->eo_info->req_resent = 0;
+		printf("send exct once request. rid=%d\n", rid);
+	}
+
+	r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type,
           ctx->routing_policy, rid);
-  cp->state = cp->request.head_buffer == cp->request.tail_buffer
+	cp->state = cp->request.head_buffer == cp->request.tail_buffer
 					? R2P2_W_RESPONSE
 					: R2P2_W_ACK;
 
@@ -890,7 +893,8 @@ static inline void __r2p2_send_req(struct iovec *iov, int iovcnt,
 
 void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx)
 {
-	__r2p2_send_req(iov, iovcnt, ctx, REQUEST_MSG);
+	__r2p2_send_req(iov, iovcnt, ctx,
+					is_exct_once(ctx) ? REQUEST_EXCT_ONCE : REQUEST_MSG);
 }
 
 #ifdef WITH_RAFT
