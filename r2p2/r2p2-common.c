@@ -455,16 +455,16 @@ static void handle_response(generic_buffer gb, int len,
 
 	cp->reply.sender = *source;
 
-	switch(get_msg_type(r2p2h)) {
-    case RESPONSE_EXCT_ONCE:
-      // todo: handle already received response
-	    assert(cp->eo_info);
-	    send_eo_ack(cp);
-  	  // no break, continue like regular response FIXME
+	switch (get_msg_type(r2p2h)) {
+		case RESPONSE_EXCT_ONCE:
+			// todo: handle already received response
+			assert(cp->eo_info);
+			send_eo_ack(cp);
+		// no break, continue like regular response
 		case RAFT_REP:
-#ifndef WITH_RAFT
-			assert(0);
-#endif
+//#ifndef WITH_RAFT
+//			assert(0);
+//#endif
 		case RESPONSE_MSG:
 			assert(cp->state == R2P2_W_RESPONSE);
 			set_buffer_payload_size(gb, len);
@@ -539,7 +539,7 @@ static void handle_request(generic_buffer gb, int len,
 						   struct r2p2_header *r2p2h,
 						   struct r2p2_host_tuple *source)
 {
-  printf("handle_request start: "); __debug_dump();
+	printf("handle_request start: "); __debug_dump();
 	struct r2p2_server_pair *sp;
 	uint16_t req_id;
 	char ack_payload[] = "ACK";
@@ -603,8 +603,7 @@ static void handle_request(generic_buffer gb, int len,
 				// send ACK
 				ack.iov_base = ack_payload;
 				ack.iov_len = 3;
-				r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_MSG, FIXED_ROUTE,
-								 req_id);
+				r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_MSG, FIXED_ROUTE, req_id);
 				buf_list_send(ack_msg.head_buffer, source, NULL);
 #ifdef LINUX
 				free_buffer(ack_msg.head_buffer);
@@ -715,7 +714,7 @@ void handle_incoming_pck(generic_buffer gb, int len,
 		handle_response(gb, len, r2p2h, source, local_host);
 #endif
 	else if (is_ack_exct_once(r2p2h))
-	  handle_ack_eo(gb, len, r2p2h, source);
+		handle_ack_eo(gb, len, r2p2h, source);
 	else
 		handle_request(gb, len, r2p2h, source);
 }
@@ -739,33 +738,32 @@ int r2p2_backend_init_per_core(void)
 
 void timer_triggered(struct r2p2_client_pair *cp)
 {
-  struct fixed_obj *fo = get_object_meta(cp);
-  if (!fo->taken)
-    return;
+	struct fixed_obj *fo = get_object_meta(cp);
+	if (!fo->taken)
+		return;
 
-  if (cp->eo_info) {
-    if (cp->eo_info->req_resent < EO_MAX_RETRY_REQUEST) {
-	    printf("EO timeout, retry\n");
-      cp_restart_timer(cp, cp->ctx->timeout);
-      buf_list_send(cp->request.head_buffer, cp->ctx->destination, cp->impl_data);
-	  } else {
-      cp->ctx->timeout_cb(cp->ctx->arg);
-	    // Flush the data
-      remove_from_pending_client_pairs(cp);
-      free_client_pair(cp);
-      return;
-    }
-    cp->eo_info->req_resent++;
+	if (cp->eo_info) {
+		if (cp->eo_info->req_resent < EO_MAX_RETRY_REQUEST) {
+			printf("EO timeout, retry\n");
+			cp_restart_timer(cp, cp->ctx->timeout);
+			buf_list_send(cp->request.head_buffer, cp->ctx->destination,
+						  cp->impl_data);
+		} else {
+			cp->ctx->timeout_cb(cp->ctx->arg);
+			// Flush the data
+			remove_from_pending_client_pairs(cp);
+			free_client_pair(cp);
+			return;
+		}
+		cp->eo_info->req_resent++;
 
 	} else {
-    assert(cp->ctx->timeout_cb);
-    cp->ctx->timeout_cb(cp->ctx->arg);
-    //printf("Timer triggered: received packets %d expected %d\n",
-    //		cp->reply_received_packets, cp->reply_expected_packets);
+		assert(cp->ctx->timeout_cb);
+		cp->ctx->timeout_cb(cp->ctx->arg);
 
-    remove_from_pending_client_pairs(cp);
-    free_client_pair(cp);
-  }
+		remove_from_pending_client_pairs(cp);
+		free_client_pair(cp);
+	}
 }
 
 /*
@@ -778,7 +776,6 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 	struct r2p2_header *r2p2h;
 
 	sp = (struct r2p2_server_pair *)handle;
-	int exct_once = sp->eo_info != NULL;
 	r2p2h = (struct r2p2_header *)get_buffer_payload(sp->request.head_buffer);
 	if (is_replicated_req(r2p2h)) {
 #ifndef WITH_RAFT
@@ -798,9 +795,8 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 				sp->request.req_id);
 	} else {
 
-		r2p2_prepare_msg(&sp->reply, iov, iovcnt,
-						 exct_once ? RESPONSE_EXCT_ONCE : RESPONSE_MSG,
-						 FIXED_ROUTE, sp->request.req_id);
+		r2p2_prepare_msg(&sp->reply, iov, iovcnt, rep_type, FIXED_ROUTE,
+						 sp->request.req_id);
 
 		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
@@ -809,7 +805,7 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 			router_notify(sp->request.sender.ip, sp->request.sender.port,
 						  sp->request.req_id);
 
-		if (!exct_once) {
+		if (rep_type == REQUEST_EXCT_ONCE) {
 			//    remove_from_pending_server_pairs(sp);
 			free_server_pair(sp);
 		} else {
@@ -821,7 +817,10 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 
 void r2p2_send_response(long handle, struct iovec *iov, int iovcnt)
 {
-	return __r2p2_send_response(handle, iov, iovcnt, RESPONSE_MSG);
+	int req_type = ((struct r2p2_server_pair *)handle)->eo_info == NULL
+					   ? RESPONSE_MSG
+					   : RESPONSE_EXCT_ONCE;
+	return __r2p2_send_response(handle, iov, iovcnt, req_type);
 }
 
 #ifdef WITH_RAFT
@@ -863,11 +862,8 @@ static inline void __r2p2_send_req(struct iovec *iov, int iovcnt,
 		printf("send exct once request. rid=%d\n", rid);
 	}
 
-	r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type,
-          ctx->routing_policy, rid);
-	cp->state = cp->request.head_buffer == cp->request.tail_buffer
-					? R2P2_W_RESPONSE
-					: R2P2_W_ACK;
+	r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type, ctx->routing_policy,
+					 rid);
 
 	add_to_pending_client_pairs(cp);
 

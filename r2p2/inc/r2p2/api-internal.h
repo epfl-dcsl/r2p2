@@ -132,18 +132,6 @@ struct r2p2_server_pair {
 	// Add here fields for garbage collection, e.g. last received
 };
 
-enum {
-  EO_NEW = 0,
-  EO_IN_PROGRESS,
-  EO_COMPLETED,
-  EO_STALE
-};
-
-struct r2p2_eo_client_info {
-    uint16_t next_seq;
-//    uint16_t extended_rid; // exclusive
-};
-
 static inline int is_response(struct r2p2_header *h)
 {
 	return ((h->type_policy & 0xF0) == (RESPONSE_MSG << 4)) ||

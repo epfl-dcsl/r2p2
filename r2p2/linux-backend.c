@@ -109,9 +109,9 @@ int r2p2_init_per_core(int core_id, int core_count)
 	}
 
 #if DEBUG
-  event.events = EPOLLIN;
+	event.events = EPOLLIN;
 	event.data.fd = 0;
-  ret = epoll_ctl(efd, EPOLL_CTL_ADD, 0, &event);
+	ret = epoll_ctl(efd, EPOLL_CTL_ADD, 0, &event);
 	if (ret)
 		return -1;
 #endif
@@ -196,21 +196,21 @@ int r2p2_init_per_core(int core_id, int core_count)
 	tp.count = 0;
 	tp.idx = 0;
 	// Create the free timers
-  for (i = 0; i < TIMERPOOL_SIZE; i++) {
-    tfd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK);
+	for (i = 0; i < TIMERPOOL_SIZE; i++) {
+		tfd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK);
 
-    tp.timers[i].fd = tfd;
-    tp.timers[i].taken = 0;
-    tp.timers[i].data = NULL;
+		tp.timers[i].fd = tfd;
+		tp.timers[i].taken = 0;
+		tp.timers[i].data = NULL;
 
-    event.events = EPOLLIN;
-    event.data.ptr = (void *)&(tp.timers[i]);
-    ret = epoll_ctl(efd, EPOLL_CTL_ADD, tfd, &event);
-    if (ret) {
-      perror("epoll_ctl");
-      return -1;
-    }
-  }
+		event.events = EPOLLIN;
+		event.data.ptr = (void *)&(tp.timers[i]);
+		ret = epoll_ctl(efd, EPOLL_CTL_ADD, tfd, &event);
+		if (ret) {
+			perror("epoll_ctl");
+			return -1;
+		}
+	}
 
 	return 0;
 }
@@ -238,20 +238,20 @@ static struct r2p2_socket *get_socket(void)
 
 static struct free_timer *get_timer(void)
 {
-  struct free_timer *res;
-  uint32_t idx;
+	struct free_timer *res;
+	uint32_t idx;
 
-  if (tp.count >= TIMERPOOL_SIZE)
-    return NULL;
+	if (tp.count >= TIMERPOOL_SIZE)
+		return NULL;
 
-  while (tp.timers[tp.idx++ & (TIMERPOOL_SIZE - 1)].taken)
-    ;
-  idx = (tp.idx - 1) & (TIMERPOOL_SIZE - 1);
-  res = &tp.timers[idx];
-  tp.timers[idx].taken = 1;
-  tp.count++;
+	while (tp.timers[tp.idx++ & (TIMERPOOL_SIZE - 1)].taken)
+		;
+	idx = (tp.idx - 1) & (TIMERPOOL_SIZE - 1);
+	res = &tp.timers[idx];
+	tp.timers[idx].taken = 1;
+	tp.count++;
 
-  return res;
+	return res;
 }
 
 static int __disarm_timer(int timerfd)
@@ -274,7 +274,7 @@ static void free_socket(struct r2p2_socket *s)
 
 static void linux_on_client_pair_free(void *data)
 {
-  printf("Free client pair\n");
+	printf("Free client pair\n");
 	struct r2p2_socket *sock = (struct r2p2_socket *)data;
 	__disarm_timer(sock->tfd);
 	free_socket(sock);
@@ -288,30 +288,33 @@ static void handle_timer_for_socket(struct r2p2_socket *s)
 		timer_triggered(s->cp);
 }
 
-static void handle_free_timer(struct free_timer *ft) {
-  assert(ft && ft->data && ft->taken);
-  __disarm_timer(ft->fd);
-  sp_timer_triggered((struct r2p2_server_pair *)ft->data);
+static void handle_free_timer(struct free_timer *ft)
+{
+	assert(ft && ft->data && ft->taken);
+	__disarm_timer(ft->fd);
+	sp_timer_triggered((struct r2p2_server_pair *)ft->data);
 }
 
-void sp_get_timer(struct r2p2_server_pair *sp) {
-  struct free_timer *t;
-  t = get_timer();
-  if (t == NULL) {
-    perror("Could not allocate free timer");
-  }
-  t->data = sp;
-  sp->eo_info->timer = t;
+void sp_get_timer(struct r2p2_server_pair *sp)
+{
+	struct free_timer *t;
+	t = get_timer();
+	if (t == NULL) {
+		perror("Could not allocate free timer");
+	}
+	t->data = sp;
+	sp->eo_info->timer = t;
 }
 
-void sp_free_timer(struct r2p2_server_pair *sp) {
-  struct free_timer *t = sp->eo_info->timer;
-  if (t) {
-    t->taken = 0;
-    t->data = NULL;
-    __disarm_timer(t->fd);
-    sp->eo_info->timer = NULL;
-  }
+void sp_free_timer(struct r2p2_server_pair *sp)
+{
+	struct free_timer *t = sp->eo_info->timer;
+	if (t) {
+		t->taken = 0;
+		t->data = NULL;
+		__disarm_timer(t->fd);
+		sp->eo_info->timer = NULL;
+	}
 }
 
 /*
@@ -434,29 +437,28 @@ void r2p2_poll(void)
 	for (i = 0; i < ready; i++) {
 
 #if DEBUG
-    if (events[i].data.fd == 0) {
-      int c;
-      while ((c = getchar()) != '\n' && c != EOF) { }
-      __debug_dump();
-      continue;
-    }
+		if (events[i].data.fd == 0) {
+		  int c;
+		  while ((c = getchar()) != '\n' && c != EOF) { }
+		  __debug_dump();
+		  continue;
+		}
 #endif
 
-    event_arg = (struct r2p2_socket *)events[i].data.ptr;
-    assert(event_arg);
+		event_arg = (struct r2p2_socket *)events[i].data.ptr;
+		assert(event_arg);
 		if (events[i].events & EPOLLIN) {
-      is_socket_timer_event =
-              (unsigned long) event_arg % sizeof(struct r2p2_socket);
-      is_free_timer_event =
-              (void *) tp.timers <= events[i].data.ptr &&
-              events[i].data.ptr < (void *) (tp.timers + TIMERPOOL_SIZE);
+			is_socket_timer_event =
+				(unsigned long)event_arg % sizeof(struct r2p2_socket);
+			is_free_timer_event =
+				(void *)tp.timers <= events[i].data.ptr &&
+				events[i].data.ptr < (void *)(tp.timers + TIMERPOOL_SIZE);
 
-      if (is_free_timer_event) {
-        handle_free_timer((struct free_timer *)events[i].data.ptr);
+			if (is_free_timer_event) {
+				handle_free_timer((struct free_timer *)events[i].data.ptr);
 
-      } else if (is_socket_timer_event) {
-				assert((unsigned long)event_arg % sizeof(struct r2p2_socket) ==
-					   4);
+			} else if (is_socket_timer_event) {
+				assert((unsigned long)event_arg % sizeof(struct r2p2_socket) == 4);
 				s = container_of(event_arg, struct r2p2_socket, tfd);
 				handle_timer_for_socket(s);
 			} else {
@@ -576,40 +578,41 @@ int disarm_timer(void *timer)
 	return __disarm_timer(tfd);
 }
 
-static void __restart_timer(int tfd, long timeout) {
-  struct itimerspec ts;
+static void __restart_timer(int tfd, long timeout)
+{
+	struct itimerspec ts;
 
-  ts.it_interval.tv_sec = 0;
-  ts.it_interval.tv_nsec = 0;
-  ts.it_value.tv_sec = timeout / 1000000;
-  ts.it_value.tv_nsec = (timeout % 1000000) * 1000;
+	ts.it_interval.tv_sec = 0;
+	ts.it_interval.tv_nsec = 0;
+	ts.it_value.tv_sec = timeout / 1000000;
+	ts.it_value.tv_nsec = (timeout % 1000000) * 1000;
 
-  if (timerfd_settime(tfd, 0, &ts, NULL) < 0) {
-    perror("Error resetting timer");
-    assert(0);
-  }
+	if (timerfd_settime(tfd, 0, &ts, NULL) < 0) {
+		perror("Error resetting timer");
+		assert(0);
+	}
 }
-
 
 int cp_restart_timer(struct r2p2_client_pair *cp, long timeout)
 {
-  struct r2p2_socket *s;
+	struct r2p2_socket *s;
 
-  s = (struct r2p2_socket *)cp->impl_data;
-  assert(s->taken && s->cp == cp);
-  __restart_timer(s->tfd, timeout);
-  cp->timer = (void *)(long)s->tfd;
-  return 0;
+	s = (struct r2p2_socket *)cp->impl_data;
+	assert(s->taken && s->cp == cp);
+	__restart_timer(s->tfd, timeout);
+	cp->timer = (void *)(long)s->tfd;
+	return 0;
 }
 
-int sp_restart_timer(struct r2p2_server_pair *sp, long timeout) {
-  struct free_timer *timer;
-  assert(sp && sp->eo_info && sp->eo_info->timer);
+int sp_restart_timer(struct r2p2_server_pair *sp, long timeout)
+{
+	struct free_timer *timer;
+	assert(sp && sp->eo_info && sp->eo_info->timer);
 
-  timer = (struct free_timer *)sp->eo_info->timer;
-  assert(timer->data == sp && timer->taken);
-  __restart_timer(timer->fd, timeout);
-  return 0;
+	timer = (struct free_timer *)sp->eo_info->timer;
+	assert(timer->data == sp && timer->taken);
+	__restart_timer(timer->fd, timeout);
+	return 0;
 }
 
 void router_notify(uint32_t ip, uint16_t port, uint16_t rid)

@@ -49,7 +49,6 @@ enum {
 enum {
 	ERR_NO_SOCKET=1,
 	ERR_DROP_MSG,
-	ERR_FULL_EXCT_ONCE_BUFFER
 };
 
 struct __attribute__((packed)) r2p2_ctx {
