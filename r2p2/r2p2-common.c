@@ -692,10 +692,10 @@ void handle_incoming_pck(generic_buffer gb, int len,
 		printf("I received %d\n", len);
 	assert((unsigned)len >= MIN_HEADER_SIZE);
 
-  buf = get_buffer_payload(gb);
-  r2p2h = (struct r2p2_header *)buf;
-  printf("\nReceived packet from %d:%d, seq=%d, len=%d\n", source->ip, source->port, r2p2h->rid, len);
-//  assert(r2p2h->header_size == (get_msg_type(r2p2h) == REQUEST_EXCT_ONCE ? sizeof(struct r2p2_header) : MIN_HEADER_SIZE));
+	buf = get_buffer_payload(gb);
+	r2p2h = (struct r2p2_header *)buf;
+	printf("\nReceived packet from %d:%d, seq=%d, len=%d\n", source->ip, source->port, r2p2h->rid, len);
+	//  assert(r2p2h->header_size == (get_msg_type(r2p2h) == REQUEST_EXCT_ONCE ? sizeof(struct r2p2_header) : MIN_HEADER_SIZE));
 
 	// Fix endianness
 	r2p2h->rid = ntohs(r2p2h->rid);

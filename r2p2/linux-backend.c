@@ -438,10 +438,10 @@ void r2p2_poll(void)
 
 #if DEBUG
 		if (events[i].data.fd == 0) {
-		  int c;
-		  while ((c = getchar()) != '\n' && c != EOF) { }
-		  __debug_dump();
-		  continue;
+			int c;
+			while ((c = getchar()) != '\n' && c != EOF) {}
+			__debug_dump();
+			continue;
 		}
 #endif
 
