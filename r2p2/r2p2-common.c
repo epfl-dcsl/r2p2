@@ -154,6 +154,8 @@ static struct r2p2_server_pair *__alloc_server_pair(int with_eo_info)
 
 	bzero(sp, sizeof(struct r2p2_server_pair));
 
+	printf("alloc sp with eo:%d\n", with_eo_info);
+
 	if (with_eo_info) {
 		sp->eo_info = malloc(sizeof(struct r2p2_sp_exct_once_info)); // TODO: use alloc_object
 		assert(sp->eo_info);
@@ -204,12 +206,14 @@ static void add_to_pending_client_pairs(struct r2p2_client_pair *cp)
 
 static void add_to_pending_server_pairs(struct r2p2_server_pair *sp)
 {
+	printf("add_to_pending_server_pairs\n");
 	struct fixed_obj *fo = get_object_meta(sp);
 	add_to_list(&pending_server_pairs, fo);
 }
 
 static void remove_from_pending_server_pairs(struct r2p2_server_pair *sp)
 {
+	printf("remove_from_pending_server_pairs\n");
 	struct fixed_obj *fo = get_object_meta(sp);
 	remove_from_list(&pending_server_pairs, fo);
 }
@@ -372,6 +376,7 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 			r2p2h->magic = MAGIC;
 			r2p2h->rid = req_id;
 			r2p2h->header_size = header_size;
+			printf("Send with policy: %d\n", (int) policy);
 			r2p2h->type_policy = (req_type << 4) | (0x0F & policy);
 			r2p2h->p_order = htons(buffer_cnt++);
 			r2p2h->flags = 0;
@@ -627,6 +632,7 @@ static void handle_request(generic_buffer gb, int len,
 			free_server_pair(sp);
 			return;
 		}
+		printf("was_in_pending_sp\n");
 		was_in_pending_sp = 1;
 	}
 	set_buffer_payload_size(gb, len);
@@ -695,6 +701,7 @@ void handle_incoming_pck(generic_buffer gb, int len,
 	buf = get_buffer_payload(gb);
 	r2p2h = (struct r2p2_header *)buf;
 	printf("\nReceived packet from %d:%d, seq=%d, len=%d\n", source->ip, source->port, r2p2h->rid, len);
+	__debug_dump();
 	//  assert(r2p2h->header_size == (get_msg_type(r2p2h) == REQUEST_EXCT_ONCE ? sizeof(struct r2p2_header) : MIN_HEADER_SIZE));
 
 	// Fix endianness
@@ -806,11 +813,11 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 						  sp->request.req_id);
 
 		if (rep_type == REQUEST_EXCT_ONCE) {
-			//    remove_from_pending_server_pairs(sp);
-			free_server_pair(sp);
-		} else {
 			sp->eo_info->reply_resent = 0;
 			sp_restart_timer(sp, EO_TO_REPLY);
+		} else {
+			//    remove_from_pending_server_pairs(sp);
+			free_server_pair(sp);
 		}
 	}
 }
