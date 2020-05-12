@@ -90,8 +90,8 @@ struct __attribute__((__packed__)) r2p2_msg {
 };
 
 struct r2p2_cp_exct_once_info {
-  // extended rid
-  uint16_t req_resent;
+	// extended rid
+	uint16_t req_resent;
 };
 
 struct r2p2_client_pair {
@@ -110,13 +110,12 @@ struct r2p2_client_pair {
 	struct r2p2_cp_exct_once_info *eo_info;
 };
 
-
 struct r2p2_sp_exct_once_info {
-  // extended rid
-  uint16_t req_received;
-  uint16_t req_resent;
-  uint16_t reply_resent;
-  void *timer;
+	// extended rid
+	uint16_t req_received;
+	uint16_t req_resent;
+	uint16_t reply_resent;
+	void *timer;
 };
 
 struct r2p2_server_pair {
