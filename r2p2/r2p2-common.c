@@ -608,10 +608,10 @@ static void handle_request(generic_buffer gb, int len,
 #ifdef LINUX
 				free_buffer(ack_msg.head_buffer);
 #endif
-			} else if (exct_once) {
-				// add to pending request
-				add_to_pending_server_pairs(sp);
 			}
+		} else if (exct_once) {
+			// add to pending request
+			add_to_pending_server_pairs(sp);
 		}
 	} else {
 		// find in pending msgs

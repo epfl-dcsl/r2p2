@@ -40,7 +40,7 @@
 #define MAGIC 0xCC
 #define SHOULD_REPLY 0x01
 
-#define EXCT_ONCE_FLAG 0x02
+#define EXCT_ONCE_FLAG 0x04
 #define EO_MAX_RETRY_REQUEST 5
 #define EO_MAX_RETRY_REPLY 5
 #define EO_TO_REPLY 2500000
