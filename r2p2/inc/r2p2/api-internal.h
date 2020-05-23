@@ -170,11 +170,6 @@ static inline uint8_t get_msg_type(struct r2p2_header *h)
 	return (h->type_policy & 0xF0) >> 4;
 }
 
-static inline unsigned int get_header_size(const char* buf)
-{
-  return ((struct r2p2_header*) buf)->header_size;
-}
-
 static inline int is_replicated_req(struct r2p2_header *h)
 {
 	return (get_policy(h) == REPLICATED_ROUTE ||

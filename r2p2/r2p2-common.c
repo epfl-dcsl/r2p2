@@ -274,8 +274,8 @@ static int prepare_to_app_iovec(struct r2p2_msg *msg)
 		buf = get_buffer_payload(gb);
 		assert(buf);
 		len = get_buffer_payload_size(gb);
-		to_app_iovec[iovcnt].iov_base = buf + get_header_size(buf);
-		to_app_iovec[iovcnt++].iov_len = len - get_header_size(buf);
+		to_app_iovec[iovcnt].iov_base = ((struct r2p2_header *)buf) + 1;
+		to_app_iovec[iovcnt++].iov_len = len - sizeof(struct r2p2_header);
 		gb = get_buffer_next(gb);
 		assert(iovcnt < 0xFF);
 	}
