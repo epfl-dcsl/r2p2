@@ -797,7 +797,7 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 			router_notify(sp->request.sender.ip, sp->request.sender.port,
 					sp->request.req_id);
 
-		if (rep_type == REQUEST_EXCT_ONCE) {
+		if (rep_type == RESPONSE_EXCT_ONCE) {
 			sp->eo_info->reply_resent = 0;
 			sp_restart_timer(sp, EO_TO_REPLY);
 		} else {
