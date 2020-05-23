@@ -47,8 +47,6 @@
 #define EO_TO_NETWORK_FLUSH 5000000
 #define ACK_NOT_RECEIVED UINT16_MAX
 
-#define MIN_HEADER_SIZE (sizeof(struct r2p2_header))// - sizeof(uint16_t))
-
 enum {
 	REQUEST_MSG = 0,
 	RESPONSE_MSG,

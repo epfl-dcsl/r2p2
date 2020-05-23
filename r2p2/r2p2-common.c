@@ -315,15 +315,12 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 					  uint8_t req_type, uint8_t policy, uint16_t req_id)
 {
 	unsigned int iov_idx, buffer_cnt, total_payload, single_packet_msg,
-				 is_first, should_small_first, header_size;
+				 is_first, should_small_first;
 	int i, bufferleft, copied, tocopy;
 	struct r2p2_header *r2p2h;
 	generic_buffer gb, new_gb;
 	char *target, *src;
 
-	header_size =  MIN_HEADER_SIZE;
-
-	// Compute the total payload
 	msg->req_id = req_id;
 	// Fix endianness for the header
 	req_id = htons(req_id);
@@ -355,10 +352,12 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 			// Set the last buffer to full size
 			if (gb) {
 				if (is_first && should_small_first) {
-					set_buffer_payload_size(gb, MIN_PAYLOAD_SIZE + header_size);
+					set_buffer_payload_size(gb, MIN_PAYLOAD_SIZE +
+													sizeof(struct r2p2_header));
 					is_first = 0;
 				} else
-					set_buffer_payload_size(gb, PAYLOAD_SIZE + header_size);
+					set_buffer_payload_size(gb, PAYLOAD_SIZE +
+													sizeof(struct r2p2_header));
 			}
 			new_gb = get_buffer();
 			assert(new_gb);
@@ -371,16 +370,15 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 				bufferleft = PAYLOAD_SIZE;
 			// FIX the header
 			r2p2h = (struct r2p2_header *)target;
-      bzero(r2p2h, header_size);
+			bzero(r2p2h, sizeof(struct r2p2_header));
 
 			r2p2h->magic = MAGIC;
 			r2p2h->rid = req_id;
-			r2p2h->header_size = header_size;
-			printf("Send with policy: %d\n", (int) policy);
+			r2p2h->header_size = sizeof(struct r2p2_header);
 			r2p2h->type_policy = (req_type << 4) | (0x0F & policy);
 			r2p2h->p_order = htons(buffer_cnt++);
 			r2p2h->flags = 0;
-			target += header_size;
+			target += sizeof(struct r2p2_header);
 		}
 		src = iov[iov_idx].iov_base;
 		tocopy = min(bufferleft, (int)(iov[iov_idx].iov_len - copied));
@@ -395,7 +393,8 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 	}
 
 	// Set the len of the last buffer
-	set_buffer_payload_size(gb, PAYLOAD_SIZE + header_size - bufferleft);
+	set_buffer_payload_size(gb, PAYLOAD_SIZE + sizeof(struct r2p2_header) -
+									bufferleft);
 
 	// Fix the header of the first and last packet
 	r2p2h = (struct r2p2_header *)get_buffer_payload(msg->head_buffer);
@@ -517,9 +516,9 @@ static void handle_response(generic_buffer gb, int len,
 		case ACK_MSG:
 			// Send the rest packets
 			assert(cp->state == R2P2_W_ACK);
-			if (len != (MIN_HEADER_SIZE + 3))
+			if (len != (sizeof(struct r2p2_header) + 3))
 				printf("ACK msg size is %d\n", len);
-			assert(len == (MIN_HEADER_SIZE + 3));
+			assert(len == (sizeof(struct r2p2_header) + 3));
 			free_buffer(gb);
 #ifdef LINUX
 			rest_to_send = get_buffer_next(cp->request.head_buffer);
@@ -694,9 +693,9 @@ void handle_incoming_pck(generic_buffer gb, int len,
 		return;
 	}
 #endif
-	if ((unsigned)len < MIN_HEADER_SIZE)
+	if ((unsigned)len < sizeof(struct r2p2_header))
 		printf("I received %d\n", len);
-	assert((unsigned)len >= MIN_HEADER_SIZE);
+	assert((unsigned)len >= sizeof(struct r2p2_header));
 
 	buf = get_buffer_payload(gb);
 	r2p2h = (struct r2p2_header *)buf;
