@@ -70,8 +70,6 @@ struct __attribute__((__packed__)) r2p2_header {
 	uint8_t flags;
 	uint16_t rid;
 	uint16_t p_order;
-//	uint16_t extended_rid;
-	// add session ID?
 };
 
 struct __attribute__((__packed__)) r2p2_feedback {
@@ -88,7 +86,6 @@ struct __attribute__((__packed__)) r2p2_msg {
 };
 
 struct r2p2_cp_exct_once_info {
-	// extended rid
 	uint16_t req_resent;
 };
 
@@ -109,7 +106,6 @@ struct r2p2_client_pair {
 };
 
 struct r2p2_sp_exct_once_info {
-	// extended rid
 	uint16_t req_received;
 	uint16_t req_resent;
 	uint16_t reply_resent;
@@ -158,6 +154,11 @@ static inline int is_raft_msg(struct r2p2_header *h)
 	return ((h->type_policy & 0xF0) == (RAFT_REQ << 4)) ||
 		((h->type_policy & 0xF0) == (RAFT_REP << 4)) ||
 		((h->type_policy & 0xF0) == (RAFT_MSG << 4));
+}
+
+static inline int is_ack_exct_once(struct r2p2_header *h)
+{
+	return ((h->type_policy & 0xF0) == (ACK_EXCT_ONCE << 4));
 }
 
 static inline uint8_t get_policy(struct r2p2_header *h)
@@ -220,7 +221,6 @@ void timer_triggered(struct r2p2_client_pair *cp);
 void sp_timer_triggered(struct r2p2_server_pair *sp);
 
 void forward_request(struct r2p2_server_pair *sp);
-
 struct r2p2_server_pair *alloc_server_pair(void);
 void free_server_pair(struct r2p2_server_pair *sp);
 void r2p2_msg_add_payload(struct r2p2_msg *msg, generic_buffer gb);
@@ -250,14 +250,9 @@ static inline int is_exct_once(struct r2p2_ctx *ctx)
   return (ctx->routing_policy & EXCT_ONCE_FLAG) != 0;
 }
 
-static inline int is_ack_exct_once(struct r2p2_header *h)
-{
-  return ((h->type_policy & 0xF0) == (ACK_EXCT_ONCE << 4));
-}
+void eo_send_ack(struct r2p2_client_pair *cp);
 
-void send_eo_ack(struct r2p2_client_pair *cp);
-
-void handle_ack_eo(generic_buffer gb, int len, struct r2p2_header *r2p2h,
+void eo_handle_ack(generic_buffer gb, int len, struct r2p2_header *r2p2h,
                    struct r2p2_host_tuple *source);
 
 int eo_try_garbage_collect(struct r2p2_server_pair *sp);

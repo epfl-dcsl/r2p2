@@ -22,22 +22,16 @@
  * SOFTWARE.
  */
 
+#include <arpa/inet.h>
 #include <assert.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-# if __APPLE__
-#include "linuxsys4mac.h"
-#else
-#include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 #include <sys/timerfd.h>
-#include <arpa/inet.h>
-#endif
-
 #include <unistd.h>
 
 #include <r2p2/cfg.h>
@@ -195,7 +189,7 @@ int r2p2_init_per_core(int core_id, int core_count)
 
 	tp.count = 0;
 	tp.idx = 0;
-	// Create the free timers
+	// Create the loose timers
 	for (i = 0; i < TIMERPOOL_SIZE; i++) {
 		tfd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK);
 
@@ -236,9 +230,9 @@ static struct r2p2_socket *get_socket(void)
 	return res;
 }
 
-static struct free_timer *get_timer(void)
+static struct loose_timer *get_timer(void)
 {
-	struct free_timer *res;
+	struct loose_timer *res;
 	uint32_t idx;
 
 	if (tp.count >= TIMERPOOL_SIZE)
@@ -274,7 +268,6 @@ static void free_socket(struct r2p2_socket *s)
 
 static void linux_on_client_pair_free(void *data)
 {
-	printf("Free client pair\n");
 	struct r2p2_socket *sock = (struct r2p2_socket *)data;
 	__disarm_timer(sock->tfd);
 	free_socket(sock);
@@ -288,7 +281,7 @@ static void handle_timer_for_socket(struct r2p2_socket *s)
 		timer_triggered(s->cp);
 }
 
-static void handle_free_timer(struct free_timer *ft)
+static void handle_loose_timer_triggered(struct loose_timer *ft)
 {
 	assert(ft && ft->data && ft->taken);
 	__disarm_timer(ft->fd);
@@ -297,7 +290,7 @@ static void handle_free_timer(struct free_timer *ft)
 
 void sp_get_timer(struct r2p2_server_pair *sp)
 {
-	struct free_timer *t;
+	struct loose_timer *t;
 	t = get_timer();
 	if (t == NULL) {
 		perror("Could not allocate free timer");
@@ -308,7 +301,7 @@ void sp_get_timer(struct r2p2_server_pair *sp)
 
 void sp_free_timer(struct r2p2_server_pair *sp)
 {
-	struct free_timer *t = sp->eo_info->timer;
+	struct loose_timer *t = sp->eo_info->timer;
 	if (t) {
 		t->taken = 0;
 		t->data = NULL;
@@ -421,7 +414,7 @@ int r2p2_init(int listen_port)
 void r2p2_poll(void)
 {
 	struct epoll_event events[MAX_EVENTS];
-	int ready, i, recvlen, is_socket_timer_event, is_free_timer_event;
+	int ready, i, recvlen, is_socket_timer_event, is_loose_timer_event;
 	struct r2p2_socket *s;
 	generic_buffer gb;
 	void *buf, *event_arg;
@@ -450,15 +443,16 @@ void r2p2_poll(void)
 		if (events[i].events & EPOLLIN) {
 			is_socket_timer_event =
 				(unsigned long)event_arg % sizeof(struct r2p2_socket);
-			is_free_timer_event =
+			is_loose_timer_event =
 				(void *)tp.timers <= events[i].data.ptr &&
 				events[i].data.ptr < (void *)(tp.timers + TIMERPOOL_SIZE);
 
-			if (is_free_timer_event) {
-				handle_free_timer((struct free_timer *)events[i].data.ptr);
-
+			if (is_loose_timer_event) {
+				handle_loose_timer_triggered(
+					(struct loose_timer *)events[i].data.ptr);
 			} else if (is_socket_timer_event) {
-				assert((unsigned long)event_arg % sizeof(struct r2p2_socket) == 4);
+				assert((unsigned long)event_arg % sizeof(struct r2p2_socket) ==
+					   4);
 				s = container_of(event_arg, struct r2p2_socket, tfd);
 				handle_timer_for_socket(s);
 			} else {
@@ -606,10 +600,10 @@ int cp_restart_timer(struct r2p2_client_pair *cp, long timeout)
 
 int sp_restart_timer(struct r2p2_server_pair *sp, long timeout)
 {
-	struct free_timer *timer;
+	struct loose_timer *timer;
 	assert(sp && sp->eo_info && sp->eo_info->timer);
 
-	timer = (struct free_timer *)sp->eo_info->timer;
+	timer = (struct loose_timer *)sp->eo_info->timer;
 	assert(timer->data == sp && timer->taken);
 	__restart_timer(timer->fd, timeout);
 	return 0;

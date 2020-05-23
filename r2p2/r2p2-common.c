@@ -62,6 +62,8 @@ static app_flow_control afc_fn = NULL;
 
 static __thread struct fixed_mempool *client_pairs;
 static __thread struct fixed_mempool *server_pairs;
+static __thread struct fixed_mempool *client_pairs_eo_info;
+static __thread struct fixed_mempool *server_pairs_eo_info;
 static __thread struct fixed_linked_list pending_client_pairs = {0};
 static __thread struct fixed_linked_list pending_server_pairs = {0};
 static __thread struct iovec to_app_iovec[0xFF];
@@ -106,8 +108,8 @@ static struct r2p2_client_pair *alloc_client_pair(int with_eo_info)
 	bzero(cp, sizeof(struct r2p2_client_pair));
 
 	if (with_eo_info) {
-	  cp->eo_info = malloc(sizeof(struct r2p2_cp_exct_once_info)); // TODO: use alloc_object
-	  assert(cp->eo_info);
+		cp->eo_info = alloc_object(client_pairs_eo_info);
+		assert(cp->eo_info);
 	}
 
 	return cp;
@@ -138,8 +140,8 @@ static void free_client_pair(struct r2p2_client_pair *cp)
 		cp->on_free(cp->impl_data);
 
 	if (cp->eo_info) {
-	  free(cp->eo_info); // TODO: use free_object
-	  cp->eo_info = NULL;
+		free_object(cp->eo_info);
+		cp->eo_info = NULL;
 	}
 
 	free_object(cp);
@@ -157,7 +159,7 @@ static struct r2p2_server_pair *__alloc_server_pair(int with_eo_info)
 	printf("alloc sp with eo:%d\n", with_eo_info);
 
 	if (with_eo_info) {
-		sp->eo_info = malloc(sizeof(struct r2p2_sp_exct_once_info)); // TODO: use alloc_object
+		sp->eo_info = alloc_object(server_pairs_eo_info);
 		assert(sp->eo_info);
 	}
 
@@ -189,11 +191,11 @@ void free_server_pair(struct r2p2_server_pair *sp)
 	}
 #endif
 
-  if (sp->eo_info) {
-    sp_free_timer(sp);
-    free(sp->eo_info); // TODO: use free_object
-    sp->eo_info = NULL;
-  }
+	if (sp->eo_info) {
+		sp_free_timer(sp);
+		free_object(sp->eo_info);
+		sp->eo_info = NULL;
+	}
 
 	free_object(sp);
 }
@@ -206,14 +208,12 @@ static void add_to_pending_client_pairs(struct r2p2_client_pair *cp)
 
 static void add_to_pending_server_pairs(struct r2p2_server_pair *sp)
 {
-	printf("add_to_pending_server_pairs\n");
 	struct fixed_obj *fo = get_object_meta(sp);
 	add_to_list(&pending_server_pairs, fo);
 }
 
 static void remove_from_pending_server_pairs(struct r2p2_server_pair *sp)
 {
-	printf("remove_from_pending_server_pairs\n");
 	struct fixed_obj *fo = get_object_meta(sp);
 	remove_from_list(&pending_server_pairs, fo);
 }
@@ -371,7 +371,6 @@ void r2p2_prepare_msg(struct r2p2_msg *msg, struct iovec *iov, int iovcnt,
 			// FIX the header
 			r2p2h = (struct r2p2_header *)target;
 			bzero(r2p2h, sizeof(struct r2p2_header));
-
 			r2p2h->magic = MAGIC;
 			r2p2h->rid = req_id;
 			r2p2h->header_size = sizeof(struct r2p2_header);
@@ -459,16 +458,15 @@ static void handle_response(generic_buffer gb, int len,
 
 	cp->reply.sender = *source;
 
-	switch (get_msg_type(r2p2h)) {
+	switch(get_msg_type(r2p2h)) {
 		case RESPONSE_EXCT_ONCE:
 			// todo: handle already received response
 			assert(cp->eo_info);
-			send_eo_ack(cp);
+			eo_send_ack(cp);
 		// no break, continue like regular response
+#ifdef WITH_RAFT
 		case RAFT_REP:
-//#ifndef WITH_RAFT
-//			assert(0);
-//#endif
+#endif
 		case RESPONSE_MSG:
 			assert(cp->state == R2P2_W_RESPONSE);
 			set_buffer_payload_size(gb, len);
@@ -543,7 +541,6 @@ static void handle_request(generic_buffer gb, int len,
 						   struct r2p2_header *r2p2h,
 						   struct r2p2_host_tuple *source)
 {
-	printf("handle_request start: "); __debug_dump();
 	struct r2p2_server_pair *sp;
 	uint16_t req_id;
 	char ack_payload[] = "ACK";
@@ -561,7 +558,6 @@ static void handle_request(generic_buffer gb, int len,
 			assert(sp->eo_info);
 			if (is_first(r2p2h)) {
 				sp->eo_info->req_received++;
-				// buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 				eo_try_garbage_collect(sp);
 			}
 			free_buffer(gb);
@@ -631,7 +627,6 @@ static void handle_request(generic_buffer gb, int len,
 			free_server_pair(sp);
 			return;
 		}
-		printf("was_in_pending_sp\n");
 		was_in_pending_sp = 1;
 	}
 	set_buffer_payload_size(gb, len);
@@ -647,7 +642,7 @@ static void handle_request(generic_buffer gb, int len,
 		return;
 	}
 
-	if (was_in_pending_sp)
+	if (was_in_pending_sp && !exct_once)
 		remove_from_pending_server_pairs(sp);
 
 #ifdef ACCELERATED
@@ -696,12 +691,8 @@ void handle_incoming_pck(generic_buffer gb, int len,
 	if ((unsigned)len < sizeof(struct r2p2_header))
 		printf("I received %d\n", len);
 	assert((unsigned)len >= sizeof(struct r2p2_header));
-
 	buf = get_buffer_payload(gb);
 	r2p2h = (struct r2p2_header *)buf;
-	printf("\nReceived packet from %d:%d, seq=%d, len=%d\n", source->ip, source->port, r2p2h->rid, len);
-	__debug_dump();
-	//  assert(r2p2h->header_size == (get_msg_type(r2p2h) == REQUEST_EXCT_ONCE ? sizeof(struct r2p2_header) : MIN_HEADER_SIZE));
 
 	// Fix endianness
 	r2p2h->rid = ntohs(r2p2h->rid);
@@ -720,7 +711,7 @@ void handle_incoming_pck(generic_buffer gb, int len,
 		handle_response(gb, len, r2p2h, source, local_host);
 #endif
 	else if (is_ack_exct_once(r2p2h))
-		handle_ack_eo(gb, len, r2p2h, source);
+		eo_handle_ack(gb, len, r2p2h, source);
 	else
 		handle_request(gb, len, r2p2h, source);
 }
@@ -733,6 +724,12 @@ int r2p2_backend_init_per_core(void)
 	assert(client_pairs);
 	server_pairs = create_mempool(POOL_SIZE, sizeof(struct r2p2_server_pair));
 	assert(server_pairs);
+	client_pairs_eo_info =
+		create_mempool(POOL_SIZE, sizeof(struct r2p2_cp_exct_once_info));
+	assert(client_pairs_eo_info);
+	server_pairs_eo_info =
+		create_mempool(POOL_SIZE, sizeof(struct r2p2_sp_exct_once_info));
+	assert(server_pairs_eo_info);
 
 	srand((unsigned)time(&t));
 
@@ -748,21 +745,12 @@ void timer_triggered(struct r2p2_client_pair *cp)
 	if (!fo->taken)
 		return;
 
-	if (cp->eo_info) {
-		if (cp->eo_info->req_resent < EO_MAX_RETRY_REQUEST) {
-			printf("EO timeout, retry\n");
-			cp_restart_timer(cp, cp->ctx->timeout);
-			buf_list_send(cp->request.head_buffer, cp->ctx->destination,
-						  cp->impl_data);
-		} else {
-			cp->ctx->timeout_cb(cp->ctx->arg);
-			// Flush the data
-			remove_from_pending_client_pairs(cp);
-			free_client_pair(cp);
-			return;
-		}
+	if (cp->eo_info && cp->eo_info->req_resent < EO_MAX_RETRY_REQUEST) {
+		printf("EO timeout, retry\n");
+		cp_restart_timer(cp, cp->ctx->timeout);
+		buf_list_send(cp->request.head_buffer, cp->ctx->destination,
+					  cp->impl_data);
 		cp->eo_info->req_resent++;
-
 	} else {
 		assert(cp->ctx->timeout_cb);
 		cp->ctx->timeout_cb(cp->ctx->arg);
@@ -800,22 +788,19 @@ static inline void __r2p2_send_response(long handle, struct iovec *iov,
 		router_notify(sp->request.sender.ip, sp->request.sender.port,
 				sp->request.req_id);
 	} else {
-
 		r2p2_prepare_msg(&sp->reply, iov, iovcnt, rep_type, FIXED_ROUTE,
 						 sp->request.req_id);
-
 		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 
 		// Notify router not for Raft requests
 		if (!is_raft_msg(r2p2h))
 			router_notify(sp->request.sender.ip, sp->request.sender.port,
-						  sp->request.req_id);
+					sp->request.req_id);
 
 		if (rep_type == REQUEST_EXCT_ONCE) {
 			sp->eo_info->reply_resent = 0;
 			sp_restart_timer(sp, EO_TO_REPLY);
 		} else {
-			//    remove_from_pending_server_pairs(sp);
 			free_server_pair(sp);
 		}
 	}
@@ -869,7 +854,7 @@ static inline void __r2p2_send_req(struct iovec *iov, int iovcnt,
 	}
 
 	r2p2_prepare_msg(&cp->request, iov, iovcnt, req_type, ctx->routing_policy,
-					 rid);
+			rid);
 
 	add_to_pending_client_pairs(cp);
 
@@ -985,75 +970,79 @@ int gbuffer_reader_init(struct gbuffer_reader *reader, generic_buffer gb)
 	return 0;
 }
 
-
 void use_exct_once(struct r2p2_ctx *ctx)
 {
-  ctx->routing_policy |= EXCT_ONCE_FLAG;
+	ctx->routing_policy |= EXCT_ONCE_FLAG;
 }
 
-void send_eo_ack(struct r2p2_client_pair *cp)
+void eo_send_ack(struct r2p2_client_pair *cp)
 {
-  assert(cp->eo_info);
-  struct iovec ack;
-  struct r2p2_msg ack_msg = {0};
+	assert(cp->eo_info);
+	struct iovec ack;
+	struct r2p2_msg ack_msg = {0};
 
-  ack.iov_base = &(cp->eo_info->req_resent);
-  ack.iov_len = sizeof(uint16_t);
-  r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_EXCT_ONCE, FIXED_ROUTE,
-                   cp->request.req_id);
-  buf_list_send(ack_msg.head_buffer, &cp->reply.sender, cp->impl_data);
+	ack.iov_base = &(cp->eo_info->req_resent);
+	ack.iov_len = sizeof(uint16_t);
+	r2p2_prepare_msg(&ack_msg, &ack, 1, ACK_EXCT_ONCE, FIXED_ROUTE,
+					 cp->request.req_id);
+	buf_list_send(ack_msg.head_buffer, &cp->reply.sender, cp->impl_data);
 #ifdef LINUX
-  free_buffer(ack_msg.head_buffer);
+	free_buffer(ack_msg.head_buffer);
 #endif
 }
 
-void handle_ack_eo(generic_buffer gb, int len,
-                   struct r2p2_header *r2p2h,
-                   struct r2p2_host_tuple *source)
+void eo_handle_ack(generic_buffer gb, int len, struct r2p2_header *r2p2h,
+				   struct r2p2_host_tuple *source)
 {
-  struct r2p2_server_pair *sp;
-  uint16_t nb_retries;
-  assert(len == r2p2h->header_size + sizeof(uint16_t));
+	struct r2p2_server_pair *sp;
+	uint16_t nb_retries;
+	assert(len == r2p2h->header_size + sizeof(uint16_t));
 
-  nb_retries = *(uint16_t *) (get_buffer_payload(gb) + r2p2h->header_size);
-  printf("Received ack from %d for %d with %d retries\n", source->port, r2p2h->rid, nb_retries);
+	nb_retries = *(uint16_t *)(get_buffer_payload(gb) + r2p2h->header_size);
+	printf("Received ack from %d for %d with %d retries\n", source->port,
+		   r2p2h->rid, nb_retries);
 
-  sp = find_in_pending_server_pairs(r2p2h->rid, source);
-  assert(sp && sp->eo_info);
-  sp->eo_info->req_resent = nb_retries;
-  if (!eo_try_garbage_collect(sp)) {
-    sp_restart_timer(sp, EO_TO_NETWORK_FLUSH);
-  }
+	sp = find_in_pending_server_pairs(r2p2h->rid, source);
+	assert(sp && sp->eo_info);
+	sp->eo_info->req_resent = nb_retries;
+	if (!eo_try_garbage_collect(sp)) {
+		sp_restart_timer(sp, EO_TO_NETWORK_FLUSH);
+	}
 }
 
 int eo_try_garbage_collect(struct r2p2_server_pair *sp)
 {
-  assert(sp != NULL || sp->eo_info != NULL);
+	assert(sp != NULL || sp->eo_info != NULL);
 
-  if (sp->eo_info->req_received > sp->eo_info->req_resent) {
-    printf("GC early for req %d, received %d/%d\n", sp->request.req_id, sp->eo_info->req_received, sp->eo_info->req_resent);
-    remove_from_pending_server_pairs(sp);
-    free_server_pair(sp);
-    return 1;
-  } else return 0;
-
+	if (sp->eo_info->req_received > sp->eo_info->req_resent) {
+		printf("GC early for req %d, received %d/%d\n", sp->request.req_id,
+			   sp->eo_info->req_received, sp->eo_info->req_resent);
+		remove_from_pending_server_pairs(sp);
+		free_server_pair(sp);
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 void sp_timer_triggered(struct r2p2_server_pair *sp)
 {
-  int timeout;
-  assert(sp && sp->eo_info);
+	int timeout;
+	assert(sp && sp->eo_info);
 
-  if (sp->eo_info->req_resent == ACK_NOT_RECEIVED && sp->eo_info->reply_resent < EO_MAX_RETRY_REPLY) {
-    printf("Retransmits based on timeout "); __debug_dump();
-    buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
-    timeout = ++sp->eo_info->reply_resent == EO_MAX_RETRY_REPLY ?
-            EO_TO_NETWORK_FLUSH : EO_TO_REPLY;
-    sp_restart_timer(sp, timeout);
-  } else {
-    printf("GC by timeout for req %d, received %d/%d\n", sp->request.req_id, sp->eo_info->req_received, sp->eo_info->req_resent);
-    remove_from_pending_server_pairs(sp);
-    free_server_pair(sp);
-  }
-
+	if (sp->eo_info->req_resent == ACK_NOT_RECEIVED &&
+		sp->eo_info->reply_resent < EO_MAX_RETRY_REPLY) {
+		printf("Retransmits based on timeout ");
+		__debug_dump();
+		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
+		timeout = ++sp->eo_info->reply_resent == EO_MAX_RETRY_REPLY
+					  ? EO_TO_NETWORK_FLUSH
+					  : EO_TO_REPLY;
+		sp_restart_timer(sp, timeout);
+	} else {
+		printf("GC by timeout for req %d, received %d/%d\n", sp->request.req_id,
+			   sp->eo_info->req_received, sp->eo_info->req_resent);
+		remove_from_pending_server_pairs(sp);
+		free_server_pair(sp);
+	}
 }

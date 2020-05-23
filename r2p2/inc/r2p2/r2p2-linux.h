@@ -57,14 +57,15 @@ struct socket_pool {
 	struct r2p2_socket sockets[SOCKPOOL_SIZE];
 };
 
-struct free_timer {
-  int fd;
-  int taken;
-  void* data;
+// Used for client pairs
+struct loose_timer {
+	int fd;
+	int taken;
+	void *data;
 };
 
 struct timer_pool {
-  uint32_t count;
-  uint32_t idx;
-  struct free_timer timers[TIMERPOOL_SIZE];
+	uint32_t count;
+	uint32_t idx;
+	struct loose_timer timers[TIMERPOOL_SIZE];
 };
