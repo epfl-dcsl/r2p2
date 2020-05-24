@@ -460,7 +460,6 @@ static void handle_response(generic_buffer gb, int len,
 
 	switch(get_msg_type(r2p2h)) {
 		case RESPONSE_EXCT_ONCE:
-			// todo: handle already received response
 			assert(cp->eo_info);
 			eo_send_ack(cp);
 		// no break, continue like regular response
