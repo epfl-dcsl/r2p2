@@ -127,8 +127,6 @@ static struct r2p2_server_pair *__alloc_server_pair(int with_eo_info)
 
 	bzero(sp, sizeof(struct r2p2_server_pair));
 
-	printf("alloc sp with eo:%d\n", with_eo_info);
-
 	if (with_eo_info) {
 		sp->eo_info = alloc_object(server_pairs_eo_info);
 		assert(sp->eo_info);
