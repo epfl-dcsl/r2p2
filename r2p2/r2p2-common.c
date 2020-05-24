@@ -69,35 +69,6 @@ static __thread struct fixed_linked_list pending_server_pairs = {0};
 static __thread struct iovec to_app_iovec[0xFF];
 static __thread uint16_t rid = 0;
 
-#if DEBUG
-static void print_cp(void* __cp) {
-  struct r2p2_client_pair* cp = (struct r2p2_client_pair*) __cp;
-  if (cp->eo_info)
-    printf("{req_id: %d, retries: %d}", cp->request.req_id, cp->eo_info->req_resent);
-}
-
-static void print_sp(void* __sp) {
-  struct r2p2_server_pair* sp = (struct r2p2_server_pair*) __sp;
-  if (sp->eo_info)
-    printf("{req_id: %d, retries: %d, req_received: %d}", sp->request.req_id, sp->eo_info->req_resent, sp->eo_info->req_received);
-}
-
-static void print_linked_list(const char* str, struct fixed_linked_list *ll, void(*print_fun)(void*)) {
-  printf("%s: ", str);
-  for (struct fixed_obj *obj = ll->head; obj; obj = obj->next) {
-    print_fun(obj->elem);
-  }
-  printf("\n");
-}
-
-void __debug_dump()
-{
-  if (pending_client_pairs.head != NULL) print_linked_list("cp", &pending_client_pairs, print_cp);
-  else if (pending_server_pairs.head != NULL) print_linked_list("sp", &pending_server_pairs, print_sp);
-  else printf("empty debug\n");
-}
-#endif
-
 static struct r2p2_client_pair *alloc_client_pair(int with_eo_info)
 {
 	struct r2p2_client_pair *cp;
@@ -1032,7 +1003,6 @@ void sp_timer_triggered(struct r2p2_server_pair *sp)
 	if (sp->eo_info->req_resent == ACK_NOT_RECEIVED &&
 		sp->eo_info->reply_resent < EO_MAX_RETRY_REPLY) {
 		printf("Retransmits based on timeout ");
-		__debug_dump();
 		buf_list_send(sp->reply.head_buffer, &sp->request.sender, NULL);
 		timeout = ++sp->eo_info->reply_resent == EO_MAX_RETRY_REPLY
 					  ? EO_TO_NETWORK_FLUSH

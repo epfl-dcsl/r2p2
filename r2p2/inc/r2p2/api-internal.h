@@ -251,18 +251,9 @@ static inline int is_exct_once(struct r2p2_ctx *ctx)
 }
 
 void eo_send_ack(struct r2p2_client_pair *cp);
-
 void eo_handle_ack(generic_buffer gb, int len, struct r2p2_header *r2p2h,
                    struct r2p2_host_tuple *source);
-
 int eo_try_garbage_collect(struct r2p2_server_pair *sp);
-
-
-#define DEBUG 1
-
-#if DEBUG
-void __debug_dump();
-#endif
 
 void router_notify(uint32_t ip, uint16_t port, uint16_t rid);
 static inline void r2p2_prepare_feedback(char *dest, uint32_t ip,

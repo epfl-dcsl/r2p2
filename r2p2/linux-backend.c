@@ -102,14 +102,6 @@ int r2p2_init_per_core(int core_id, int core_count)
 		return -1;
 	}
 
-#if DEBUG
-	event.events = EPOLLIN;
-	event.data.fd = 0;
-	ret = epoll_ctl(efd, EPOLL_CTL_ADD, 0, &event);
-	if (ret)
-		return -1;
-#endif
-
 	// Add the server socket
 	event.events = EPOLLIN;
 	event.data.ptr = (void *)&sock.fd;
@@ -428,16 +420,6 @@ void r2p2_poll(void)
 
 	ready = epoll_wait(efd, events, MAX_EVENTS, 0);
 	for (i = 0; i < ready; i++) {
-
-#if DEBUG
-		if (events[i].data.fd == 0) {
-			int c;
-			while ((c = getchar()) != '\n' && c != EOF) {}
-			__debug_dump();
-			continue;
-		}
-#endif
-
 		event_arg = (struct r2p2_socket *)events[i].data.ptr;
 		assert(event_arg);
 		if (events[i].events & EPOLLIN) {
