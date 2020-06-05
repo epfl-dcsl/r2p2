@@ -941,6 +941,7 @@ int gbuffer_reader_init(struct gbuffer_reader *reader, generic_buffer gb)
 void use_exct_once(struct r2p2_ctx *ctx)
 {
 	ctx->routing_policy |= EXCT_ONCE_FLAG;
+	ctx->timeout = EO_TO_REQUEST;
 }
 
 void eo_send_ack(struct r2p2_client_pair *cp)

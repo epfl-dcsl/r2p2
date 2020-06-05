@@ -41,11 +41,14 @@
 #define SHOULD_REPLY 0x01
 
 #define EXCT_ONCE_FLAG 0x04
+#define ACK_NOT_RECEIVED UINT16_MAX
+
+// Below macros should be adapted to the system
 #define EO_MAX_RETRY_REQUEST 5
 #define EO_MAX_RETRY_REPLY 5
+#define EO_TO_REQUEST 2500000
 #define EO_TO_REPLY 2500000
 #define EO_TO_NETWORK_FLUSH 5000000
-#define ACK_NOT_RECEIVED UINT16_MAX
 
 enum {
 	REQUEST_MSG = 0,

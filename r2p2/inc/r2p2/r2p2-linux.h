@@ -57,7 +57,7 @@ struct socket_pool {
 	struct r2p2_socket sockets[SOCKPOOL_SIZE];
 };
 
-// Used for client pairs
+// Used for server pairs
 struct loose_timer {
 	int fd;
 	int taken;
