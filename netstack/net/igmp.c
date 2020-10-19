@@ -40,13 +40,13 @@ static void igmp_handle_membership_query(void)
 	int i;
 	struct net_sge *entry;
 	struct rte_mbuf *pkt_buf;
-	struct ipv4_hdr *iph;
+	struct rte_ipv4_hdr *iph;
 	struct igmpv2_hdr *igmph;
 
 	for (i=0;i<CFG.multicast_cnt;i++) {
 		entry = alloc_net_sge();
 		pkt_buf = entry->handle;
-		iph = rte_pktmbuf_mtod_offset(pkt_buf, struct ipv4_hdr *, L2_HDR_LEN);
+		iph = rte_pktmbuf_mtod_offset(pkt_buf, struct rte_ipv4_hdr *, L2_HDR_LEN);
 		igmph = rte_pktmbuf_mtod_offset(pkt_buf, struct igmpv2_hdr *,
 				L3_HDR_LEN+4); // extra space for options
 		igmph->gaddr = rte_cpu_to_be_32(CFG.multicast_ips[i]);
@@ -70,7 +70,7 @@ int igmp_init(void)
 	return 0;
 }
 
-void igmp_in(void *pkt_buf, __attribute__((unused))struct ipv4_hdr *iph,
+void igmp_in(void *pkt_buf, __attribute__((unused))struct rte_ipv4_hdr *iph,
 		struct igmpv2_hdr *igmph)
 {
 	switch(igmph->type) {

@@ -38,15 +38,15 @@
 #include <net/net.h>
 #include <net/utils.h>
 
-static void icmp_echo(void *pkt_buf, struct ipv4_hdr *iph,
-					  struct icmp_hdr *icmph)
+static void icmp_echo(void *pkt_buf, struct rte_ipv4_hdr *iph,
+					  struct rte_icmp_hdr *icmph)
 {
 	int iphlen;
 	int icmplen;
 
 	/* compute icmp length */
-	iphlen = (iph->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
-	icmph->icmp_type = IP_ICMP_ECHO_REPLY;
+	iphlen = (iph->version_ihl & RTE_IPV4_HDR_IHL_MASK) * RTE_IPV4_IHL_MULTIPLIER;
+	icmph->icmp_type = RTE_IP_ICMP_ECHO_REPLY;
 
 	icmplen = rte_be_to_cpu_16(iph->total_length) - iphlen;
 
@@ -58,9 +58,9 @@ static void icmp_echo(void *pkt_buf, struct ipv4_hdr *iph,
 		   iph->type_of_service, IPPROTO_ICMP, icmplen, NULL);
 }
 
-void icmp_in(void *pkt_buf, struct ipv4_hdr *iph, struct icmp_hdr *icmph)
+void icmp_in(void *pkt_buf, struct rte_ipv4_hdr *iph, struct rte_icmp_hdr *icmph)
 {
-	if (icmph->icmp_type == IP_ICMP_ECHO_REQUEST)
+	if (icmph->icmp_type == RTE_IP_ICMP_ECHO_REQUEST)
 		icmp_echo(pkt_buf, iph, icmph);
 	else {
 		printf("Wrong ICMP type: %d\n", icmph->icmp_type);
