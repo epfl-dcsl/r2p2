@@ -54,7 +54,7 @@ static const struct rte_eth_conf port_conf = {
 		{
 			.split_hdr_size = 0,
 			.max_rx_pkt_len = RTE_ETHER_MAX_LEN, /** added to fix "Ethdev port_id=0 max_rx_pkt_len 0 < min valid value 64"*/
-			.offloads = DEV_RX_OFFLOAD_KEEP_CRC,
+			.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM | DEV_RX_OFFLOAD_KEEP_CRC,
 			.mq_mode = ETH_MQ_RX_RSS,
 		},
 	.rx_adv_conf =
