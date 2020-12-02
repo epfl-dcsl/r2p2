@@ -397,7 +397,11 @@ static void handle_response(generic_buffer gb, int len,
 	}
 #endif
 
-	cp->reply.sender = *source;
+	// cp->reply.sender = *source;
+	// *source has network endianness. Later, buf_list_send() expects host endianness.
+	// Changing to store host endianness.
+	cp->reply.sender.ip = ntohl(source->ip);
+	cp->reply.sender.port = ntohs(source->port);
 
 	switch(get_msg_type(r2p2h)) {
 		case RAFT_REP:
