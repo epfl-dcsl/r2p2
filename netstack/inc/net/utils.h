@@ -38,13 +38,13 @@ static inline uint32_t ip_str_to_int(const char *ip)
 	if (sscanf(ip, "%hhu.%hhu.%hhu.%hhu", &a, &b, &c, &d) != 4) {
 		return -EINVAL;
 	}
-	addr = IPv4(a, b, c, d);
+	addr = RTE_IPV4(a, b, c, d);
 	return addr;
 }
 
 static inline int str_to_eth_addr(const char *src, unsigned char *dst)
 {
-	struct ether_addr tmp;
+	struct rte_ether_addr tmp;
 
 	if (sscanf(src, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &tmp.addr_bytes[0],
 			   &tmp.addr_bytes[1], &tmp.addr_bytes[2], &tmp.addr_bytes[3],
@@ -62,14 +62,14 @@ static inline void ip_addr_to_str(uint32_t addr, char *str)
 
 static inline void pkt_dump(struct rte_mbuf *pkt)
 {
-	struct ether_hdr *ethh = rte_pktmbuf_mtod(pkt, struct ether_hdr *);
-	struct ipv4_hdr *iph = rte_pktmbuf_mtod_offset(pkt, struct ipv4_hdr *,
-												   sizeof(struct ether_hdr));
+	struct rte_ether_hdr *ethh = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
+	struct rte_ipv4_hdr *iph = rte_pktmbuf_mtod_offset(pkt, struct rte_ipv4_hdr *,
+												   sizeof(struct rte_ether_hdr));
 	printf("DST MAC: ");
-	for (int i = 0; i < ETHER_ADDR_LEN; i++)
+	for (int i = 0; i < RTE_ETHER_ADDR_LEN; i++)
 		printf("%hhx ", (char)ethh->d_addr.addr_bytes[i]);
 	printf("\nSRC MAC: ");
-	for (int i = 0; i < ETHER_ADDR_LEN; i++)
+	for (int i = 0; i < RTE_ETHER_ADDR_LEN; i++)
 		printf("%hhx ", (char)ethh->s_addr.addr_bytes[i]);
 	char ipaddr[64];
 	ip_addr_to_str(iph->src_addr, ipaddr);

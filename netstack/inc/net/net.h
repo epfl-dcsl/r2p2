@@ -42,10 +42,10 @@
 #include <r2p2/cfg.h>
 
 #define ETH_MTU 1500
-#define UDP_MAX_LEN (ETH_MTU - sizeof(struct ipv4_hdr) - sizeof(struct udp_hdr))
-#define L2_HDR_LEN sizeof(struct ether_hdr)
-#define L3_HDR_LEN (L2_HDR_LEN + sizeof(struct ipv4_hdr))
-#define UDP_HDRS_LEN (L3_HDR_LEN + sizeof(struct udp_hdr))
+#define UDP_MAX_LEN (ETH_MTU - sizeof(struct rte_ipv4_hdr) - sizeof(struct rte_udp_hdr))
+#define L2_HDR_LEN sizeof(struct rte_ether_hdr)
+#define L3_HDR_LEN (L2_HDR_LEN + sizeof(struct rte_ipv4_hdr))
+#define UDP_HDRS_LEN (L3_HDR_LEN + sizeof(struct rte_udp_hdr))
 
 struct ip_tuple {
 	uint32_t src_ip;
@@ -64,21 +64,21 @@ int add_arp_entry(const char *ip, const char *mac);
 /* packet processing */
 void eth_in(struct rte_mbuf *pkt_buf);
 int eth_out(struct rte_mbuf *pkt_buf, uint16_t h_proto,
-			struct ether_addr *dst_haddr, uint16_t iplen);
-void arp_in(struct rte_mbuf *pkt_buf, struct arp_hdr *arph);
-struct ether_addr *arp_lookup_mac(uint32_t addr);
-void ip_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph);
-void ip_out(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph, uint32_t src_ip,
+			struct rte_ether_addr *dst_haddr, uint16_t iplen);
+void arp_in(struct rte_mbuf *pkt_buf, struct rte_arp_hdr *arph);
+struct rte_ether_addr *arp_lookup_mac(uint32_t addr);
+void ip_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph);
+void ip_out(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph, uint32_t src_ip,
 			uint32_t dst_ip, uint8_t ttl, uint8_t tos, uint8_t proto,
-			uint16_t l4len, struct ether_addr *dst_haddr);
-void icmp_in(void *pkt_buf, struct ipv4_hdr *iph, struct icmp_hdr *icmph);
-void igmp_in(void *pkt_buf, struct ipv4_hdr *iph, struct igmpv2_hdr *igmph);
-void udp_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-			struct udp_hdr *udph);
+			uint16_t l4len, struct rte_ether_addr *dst_haddr);
+void icmp_in(void *pkt_buf, struct rte_ipv4_hdr *iph, struct rte_icmp_hdr *icmph);
+void igmp_in(void *pkt_buf, struct rte_ipv4_hdr *iph, struct igmpv2_hdr *igmph);
+void udp_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+			struct rte_udp_hdr *udph);
 int udp_out(struct rte_mbuf *pkt_buf, struct ip_tuple *id, int len);
 #ifdef ROUTER
-void router_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-			   struct udp_hdr *udph);
+void router_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+			   struct rte_udp_hdr *udph);
 #endif
 
 static inline uint16_t get_local_port(void)
@@ -91,7 +91,7 @@ static inline uint32_t get_local_ip(void)
 	return CFG.host_addr;
 }
 
-static inline void get_local_mac(struct ether_addr *mac)
+static inline void get_local_mac(struct rte_ether_addr *mac)
 {
 	rte_eth_macaddr_get(0, mac); // Assume only one NIC
 }

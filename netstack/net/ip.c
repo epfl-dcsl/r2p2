@@ -42,10 +42,10 @@ static inline int ip_is_multicast(uint32_t ip)
 	return  (first_oct >= 224) && (first_oct <= 239);
 }
 
-void ip_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph)
+void ip_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph)
 {
-	struct icmp_hdr *icmph;
-	struct udp_hdr *udph;
+	struct rte_icmp_hdr *icmph;
+	struct rte_udp_hdr *udph;
 	struct igmpv2_hdr *igmph;
 	int hdrlen;
 
@@ -54,14 +54,14 @@ void ip_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph)
 		goto out;
 
 	/* perform necessary checks */
-	hdrlen = (iph->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
+	hdrlen = (iph->version_ihl & RTE_IPV4_HDR_IHL_MASK) * RTE_IPV4_IHL_MULTIPLIER;
 
 	switch (iph->next_proto_id) {
 	case IPPROTO_TCP:
 		printf("TCP not supported\n");
 		break;
 	case IPPROTO_UDP:
-		udph = (struct udp_hdr *)((unsigned char *)iph + hdrlen);
+		udph = (struct rte_udp_hdr *)((unsigned char *)iph + hdrlen);
 #ifdef ROUTER
 		router_in(pkt_buf, iph, udph);
 #else
@@ -69,7 +69,7 @@ void ip_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph)
 #endif
 		break;
 	case IPPROTO_ICMP:
-		icmph = (struct icmp_hdr *)((unsigned char *)iph + hdrlen);
+		icmph = (struct rte_icmp_hdr *)((unsigned char *)iph + hdrlen);
 		icmp_in(pkt_buf, iph, icmph);
 		break;
 	case IPPROTO_IGMP:
@@ -87,20 +87,20 @@ out:
 	rte_pktmbuf_free(pkt_buf);
 }
 
-void ip_out(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph, uint32_t src_ip,
+void ip_out(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph, uint32_t src_ip,
 			uint32_t dst_ip, uint8_t ttl, uint8_t tos, uint8_t proto,
-			uint16_t l4len, struct ether_addr *dst_haddr)
+			uint16_t l4len, struct rte_ether_addr *dst_haddr)
 {
 	int sent, hdrlen;
 	char *options;
 
-	hdrlen = sizeof(struct ipv4_hdr);
+	hdrlen = sizeof(struct rte_ipv4_hdr);
 	if (proto == IPPROTO_IGMP)
 		hdrlen += 4; // 4 bytes for options
 
 	/* setup ip hdr */
 	iph->version_ihl =
-		(4 << 4) | (hdrlen / IPV4_IHL_MULTIPLIER);
+		(4 << 4) | (hdrlen / RTE_IPV4_IHL_MULTIPLIER);
 	iph->type_of_service = tos;
 	iph->total_length = rte_cpu_to_be_16(hdrlen + l4len);
 	iph->packet_id = 0;
@@ -140,7 +140,7 @@ void ip_out(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph, uint32_t src_ip,
 		assert(0);
 	}
 
-	sent = eth_out(pkt_buf, ETHER_TYPE_IPv4, dst_haddr,
+	sent = eth_out(pkt_buf, RTE_ETHER_TYPE_IPV4, dst_haddr,
 				   rte_be_to_cpu_16(iph->total_length));
 	assert(sent == 1);
 }

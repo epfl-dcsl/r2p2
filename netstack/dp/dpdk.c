@@ -53,11 +53,8 @@ static const struct rte_eth_conf port_conf = {
 	.rxmode =
 		{
 			.split_hdr_size = 0,
-			.header_split = 0,   /**< Header Split disabled */
-			.hw_ip_checksum = 1, /**< IP checksum offload disabled */
-			.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-			.jumbo_frame = 0,	/**< Jumbo Frame Support disabled */
-			.hw_strip_crc = 1,   /**< CRC stripped by hardware */
+			.max_rx_pkt_len = RTE_ETHER_MAX_LEN, /** added to fix "Ethdev port_id=0 max_rx_pkt_len 0 < min valid value 64"*/
+			.offloads = DEV_RX_OFFLOAD_IPV4_CKSUM | DEV_RX_OFFLOAD_KEEP_CRC,
 			.mq_mode = ETH_MQ_RX_RSS,
 		},
 	.rx_adv_conf =
@@ -107,7 +104,7 @@ void dpdk_init(int *argc, char ***argv)
 	if (pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 
-	nb_ports = rte_eth_dev_count();
+	nb_ports = rte_eth_dev_count_avail();
 	if (nb_ports == 0)
 		rte_exit(EXIT_FAILURE, "No Ethernet ports - bye\n");
 

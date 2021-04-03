@@ -19,4 +19,4 @@ struct __attribute__((packed)) igmpv2_hdr {
 	uint32_t gaddr;
 };
 
-void igmp_in(void *pkt_buf, struct ipv4_hdr *iph, struct igmpv2_hdr *igmph);
+void igmp_in(void *pkt_buf, struct rte_ipv4_hdr *iph, struct igmpv2_hdr *igmph);

@@ -35,8 +35,8 @@
 #include <net/net.h>
 #include <net/utils.h>
 
-void udp_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-			struct udp_hdr *udph)
+void udp_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+			struct rte_udp_hdr *udph)
 {
 	struct ip_tuple *id;
 	struct net_sge *e;
@@ -49,8 +49,8 @@ void udp_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
 
 	e = rte_pktmbuf_mtod_offset(pkt_buf, struct net_sge *,
 								sizeof(struct ip_tuple));
-	e->len = rte_be_to_cpu_16(udph->dgram_len) - sizeof(struct udp_hdr);
-	e->payload = (void *)((unsigned char *)udph + sizeof(struct udp_hdr));
+	e->len = rte_be_to_cpu_16(udph->dgram_len) - sizeof(struct rte_udp_hdr);
+	e->payload = (void *)((unsigned char *)udph + sizeof(struct rte_udp_hdr));
 	e->handle = pkt_buf;
 
 	global_ops->udp_recv(e, id);
@@ -58,18 +58,18 @@ void udp_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
 
 int udp_out(struct rte_mbuf *pkt_buf, struct ip_tuple *id, int len)
 {
-	struct ipv4_hdr *iph = rte_pktmbuf_mtod_offset(pkt_buf, struct ipv4_hdr *,
-												   sizeof(struct ether_hdr));
-	struct udp_hdr *udph = rte_pktmbuf_mtod_offset(pkt_buf, struct udp_hdr *,
-												   sizeof(struct ether_hdr) +
-													   sizeof(struct ipv4_hdr));
+	struct rte_ipv4_hdr *iph = rte_pktmbuf_mtod_offset(pkt_buf, struct rte_ipv4_hdr *,
+												   sizeof(struct rte_ether_hdr));
+	struct rte_udp_hdr *udph = rte_pktmbuf_mtod_offset(pkt_buf, struct rte_udp_hdr *,
+												   sizeof(struct rte_ether_hdr) +
+													   sizeof(struct rte_ipv4_hdr));
 
 	udph->dgram_cksum = 0;
-	udph->dgram_len = rte_cpu_to_be_16(len + sizeof(struct udp_hdr));
+	udph->dgram_len = rte_cpu_to_be_16(len + sizeof(struct rte_udp_hdr));
 	udph->src_port = rte_cpu_to_be_16(id->src_port);
 	udph->dst_port = rte_cpu_to_be_16(id->dst_port);
 
 	ip_out(pkt_buf, iph, id->src_ip, id->dst_ip, 64, 0, IPPROTO_UDP,
-		   len + sizeof(struct udp_hdr), NULL);
+		   len + sizeof(struct rte_udp_hdr), NULL);
 	return 0;
 }

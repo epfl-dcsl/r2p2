@@ -142,12 +142,12 @@ static int configure_fdir(void)
 	return 0;
 }
 
-static int is_control(struct udp_hdr *udph)
+static int is_control(struct rte_udp_hdr *udph)
 {
 	return rte_be_to_cpu_16(udph->dst_port) == 9000;
 }
 
-static void update_tokens(struct ipv4_hdr *iph, struct udp_hdr *udph)
+static void update_tokens(struct rte_ipv4_hdr *iph, struct rte_udp_hdr *udph)
 {
 	int i;
 	uint16_t port;
@@ -211,8 +211,8 @@ static struct target *select_target(void)
 	return NULL;
 }
 
-static void send_to_worker(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-						   struct udp_hdr *udph, struct target *t)
+static void send_to_worker(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+						   struct rte_udp_hdr *udph, struct target *t)
 {
 	udph->dst_port = rte_cpu_to_be_16(t->target_port);
 	ip_out(pkt_buf, iph, rte_be_to_cpu_32(iph->src_addr), t->target_ip,
@@ -220,8 +220,8 @@ static void send_to_worker(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
 		   rte_be_to_cpu_16(udph->dgram_len), NULL);
 }
 
-static void ctrl_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-					struct udp_hdr *udph)
+static void ctrl_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+					struct rte_udp_hdr *udph)
 {
 	if ((policy == FC) || (policy == JSQ))
 		update_tokens(iph, udph);
@@ -229,8 +229,8 @@ static void ctrl_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
 	rte_pktmbuf_free(pkt_buf);
 }
 
-static void fw_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-				  struct udp_hdr *udph)
+static void fw_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+				  struct rte_udp_hdr *udph)
 {
 	struct target *t;
 	struct r2p2_header *r2p2h;
@@ -250,8 +250,8 @@ static void fw_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
 }
 
 static void fc_fw_in(struct rte_mbuf *pkt_buf,
-					 __attribute__((unused)) struct ipv4_hdr *iph,
-					 struct udp_hdr *udph)
+					 __attribute__((unused)) struct rte_ipv4_hdr *iph,
+					 struct rte_udp_hdr *udph)
 {
 	struct r2p2_header *r2p2h;
 	uint8_t policy;
@@ -280,8 +280,8 @@ static void fc_fw_in(struct rte_mbuf *pkt_buf,
 		assert(0);
 }
 
-void router_in(struct rte_mbuf *pkt_buf, struct ipv4_hdr *iph,
-			   struct udp_hdr *udph)
+void router_in(struct rte_mbuf *pkt_buf, struct rte_ipv4_hdr *iph,
+			   struct rte_udp_hdr *udph)
 {
 	if (is_control(udph))
 		ctrl_in(pkt_buf, iph, udph);
@@ -357,8 +357,8 @@ static void send_from_pending_routed(struct target *t)
 {
 	int iphdrlen;
 	struct rte_mbuf *to_send;
-	struct ipv4_hdr *to_send_iph;
-	struct udp_hdr *to_send_udph;
+	struct rte_ipv4_hdr *to_send_iph;
+	struct rte_udp_hdr *to_send_udph;
 
 	to_send = pending_routed_head;
 	pending_routed_head = to_send->userdata;
@@ -366,12 +366,12 @@ static void send_from_pending_routed(struct target *t)
 	if (!pending_routed_count)
 		pending_routed_tail = NULL;
 
-	to_send_iph = rte_pktmbuf_mtod_offset(to_send, struct ipv4_hdr *,
-										  sizeof(struct ether_hdr));
+	to_send_iph = rte_pktmbuf_mtod_offset(to_send, struct rte_ipv4_hdr *,
+										  sizeof(struct rte_ether_hdr));
 	iphdrlen =
-		(to_send_iph->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
-	to_send_udph = rte_pktmbuf_mtod_offset(to_send, struct udp_hdr *,
-										   sizeof(struct ether_hdr) + iphdrlen);
+		(to_send_iph->version_ihl & RTE_IPV4_HDR_IHL_MASK) * RTE_IPV4_IHL_MULTIPLIER;
+	to_send_udph = rte_pktmbuf_mtod_offset(to_send, struct rte_udp_hdr *,
+										   sizeof(struct rte_ether_hdr) + iphdrlen);
 
 	send_to_worker(to_send, to_send_iph, to_send_udph, t);
 }
@@ -380,8 +380,8 @@ static void send_from_pending_direct(struct target *t)
 {
 	int iphdrlen;
 	struct rte_mbuf *to_send;
-	struct ipv4_hdr *to_send_iph;
-	struct udp_hdr *to_send_udph;
+	struct rte_ipv4_hdr *to_send_iph;
+	struct rte_udp_hdr *to_send_udph;
 
 	to_send = pending_direct_head;
 	pending_direct_head = to_send->userdata;
@@ -389,12 +389,12 @@ static void send_from_pending_direct(struct target *t)
 	if (!pending_direct_count)
 		pending_direct_tail = NULL;
 
-	to_send_iph = rte_pktmbuf_mtod_offset(to_send, struct ipv4_hdr *,
-										  sizeof(struct ether_hdr));
+	to_send_iph = rte_pktmbuf_mtod_offset(to_send, struct rte_ipv4_hdr *,
+										  sizeof(struct rte_ether_hdr));
 	iphdrlen =
-		(to_send_iph->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
-	to_send_udph = rte_pktmbuf_mtod_offset(to_send, struct udp_hdr *,
-										   sizeof(struct ether_hdr) + iphdrlen);
+		(to_send_iph->version_ihl & RTE_IPV4_HDR_IHL_MASK) * RTE_IPV4_IHL_MULTIPLIER;
+	to_send_udph = rte_pktmbuf_mtod_offset(to_send, struct rte_udp_hdr *,
+										   sizeof(struct rte_ether_hdr) + iphdrlen);
 
 	send_to_worker(to_send, to_send_iph, to_send_udph, t);
 }

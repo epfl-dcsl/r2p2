@@ -41,7 +41,7 @@
 
 struct arp_entry {
 	uint32_t addr;
-	struct ether_addr mac;
+	struct rte_ether_addr mac;
 };
 
 static struct arp_entry known_haddrs[ARP_ENTRIES_COUNT];
@@ -65,14 +65,14 @@ int add_arp_entry(const char *ip, const char *mac)
 	return 0;
 }
 
-static void arp_out(struct rte_mbuf *pkt_buf, struct arp_hdr *arph, int opcode,
-					uint32_t dst_ip, struct ether_addr *dst_haddr)
+static void arp_out(struct rte_mbuf *pkt_buf, struct rte_arp_hdr *arph, int opcode,
+					uint32_t dst_ip, struct rte_ether_addr *dst_haddr)
 {
 	int sent;
 
 	/* fill arp header */
 	/* previous fields remain the same */
-	arph->arp_op = rte_cpu_to_be_16(opcode);
+	arph->arp_opcode = rte_cpu_to_be_16(opcode);
 
 	/* fill arp body */
 	arph->arp_data.arp_sip = rte_cpu_to_be_32(get_local_ip());
@@ -81,12 +81,12 @@ static void arp_out(struct rte_mbuf *pkt_buf, struct arp_hdr *arph, int opcode,
 	arph->arp_data.arp_tha = *dst_haddr;
 	get_local_mac(&arph->arp_data.arp_sha); // Assume only one NIC
 
-	sent = eth_out(pkt_buf, ETHER_TYPE_ARP, &arph->arp_data.arp_tha,
-				   sizeof(struct arp_hdr));
+	sent = eth_out(pkt_buf, RTE_ETHER_TYPE_ARP, &arph->arp_data.arp_tha,
+				   sizeof(struct rte_arp_hdr));
 	assert(sent == 1);
 }
 
-struct ether_addr *arp_lookup_mac(uint32_t addr)
+struct rte_ether_addr *arp_lookup_mac(uint32_t addr)
 {
 #ifdef ROUTER
 	return &known_haddrs[addr - known_haddrs[0].addr].mac;
@@ -100,7 +100,7 @@ struct ether_addr *arp_lookup_mac(uint32_t addr)
 	return NULL;
 }
 
-void arp_in(struct rte_mbuf *pkt_buf, struct arp_hdr *arph)
+void arp_in(struct rte_mbuf *pkt_buf, struct rte_arp_hdr *arph)
 {
 	/* process only arp for this address */
 	if (rte_be_to_cpu_32(arph->arp_data.arp_tip) != get_local_ip()) {
@@ -108,12 +108,12 @@ void arp_in(struct rte_mbuf *pkt_buf, struct arp_hdr *arph)
 		return;
 	}
 
-	switch (rte_be_to_cpu_16(arph->arp_op)) {
-	case ARP_OP_REQUEST:
-		arp_out(pkt_buf, arph, ARP_OP_REPLY, arph->arp_data.arp_sip,
+	switch (rte_be_to_cpu_16(arph->arp_opcode)) {
+	case RTE_ARP_OP_REQUEST:
+		arp_out(pkt_buf, arph, RTE_ARP_OP_REPLY, arph->arp_data.arp_sip,
 				&arph->arp_data.arp_sha);
 		break;
-	case ARP_OP_REPLY:
+	case RTE_ARP_OP_REPLY:
 		break;
 	default:
 		printf("apr: Received unknown ARP op");
