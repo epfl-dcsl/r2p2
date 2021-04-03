@@ -40,12 +40,25 @@
 #define MAGIC 0xCC
 #define SHOULD_REPLY 0x01
 
+#define EXCT_ONCE_FLAG 0x04
+#define ACK_NOT_RECEIVED UINT16_MAX
+
+// Below macros should be adapted to the system
+#define EO_MAX_RETRY_REQUEST 5
+#define EO_MAX_RETRY_REPLY 5
+#define EO_TO_REQUEST 2500000
+#define EO_TO_REPLY 2500000
+#define EO_TO_NETWORK_FLUSH 5000000
+
 enum {
 	REQUEST_MSG = 0,
 	RESPONSE_MSG,
 	FEEDBACK_MSG,
 	ACK_MSG,
 	DROP_MSG,
+	REQUEST_EXCT_ONCE,
+	RESPONSE_EXCT_ONCE,
+	ACK_EXCT_ONCE,
 	RAFT_REQ,
 	RAFT_REP,
 	RAFT_MSG,
@@ -75,6 +88,10 @@ struct __attribute__((__packed__)) r2p2_msg {
 	generic_buffer tail_buffer;
 };
 
+struct r2p2_cp_exct_once_info {
+	uint16_t req_resent;
+};
+
 struct r2p2_client_pair {
 	struct r2p2_msg request;
 	struct r2p2_msg reply;
@@ -88,6 +105,14 @@ struct r2p2_client_pair {
 	void *timer;
 	void *impl_data; // Used to hold the socket used in linux
 	void (*on_free)(void *impl_data);
+	struct r2p2_cp_exct_once_info *eo_info;
+};
+
+struct r2p2_sp_exct_once_info {
+	uint16_t req_received;
+	uint16_t req_resent;
+	uint16_t reply_resent;
+	void *timer;
 };
 
 struct r2p2_server_pair {
@@ -95,6 +120,7 @@ struct r2p2_server_pair {
 	struct r2p2_msg reply;
 	uint16_t request_expected_packets;
 	uint16_t request_received_packets;
+	struct r2p2_sp_exct_once_info *eo_info;
 	uint8_t flags;
 #ifdef ACCELERATED
 	long received_at;
@@ -105,6 +131,7 @@ struct r2p2_server_pair {
 static inline int is_response(struct r2p2_header *h)
 {
 	return ((h->type_policy & 0xF0) == (RESPONSE_MSG << 4)) ||
+		((h->type_policy & 0xF0) == (RESPONSE_EXCT_ONCE << 4)) ||
 		((h->type_policy & 0xF0) == (ACK_MSG << 4)) ||
 		((h->type_policy & 0xF0) == (DROP_MSG << 4)) ||
 		((h->type_policy & 0xF0) == (RAFT_REP << 4));
@@ -130,6 +157,11 @@ static inline int is_raft_msg(struct r2p2_header *h)
 	return ((h->type_policy & 0xF0) == (RAFT_REQ << 4)) ||
 		((h->type_policy & 0xF0) == (RAFT_REP << 4)) ||
 		((h->type_policy & 0xF0) == (RAFT_MSG << 4));
+}
+
+static inline int is_ack_exct_once(struct r2p2_header *h)
+{
+	return ((h->type_policy & 0xF0) == (ACK_EXCT_ONCE << 4));
 }
 
 static inline uint8_t get_policy(struct r2p2_header *h)
@@ -189,6 +221,8 @@ void handle_incoming_pck(generic_buffer gb, int len,
 						 struct r2p2_host_tuple *local_host);
 #endif
 void timer_triggered(struct r2p2_client_pair *cp);
+void sp_timer_triggered(struct r2p2_server_pair *sp);
+
 void forward_request(struct r2p2_server_pair *sp);
 struct r2p2_server_pair *alloc_server_pair(void);
 void free_server_pair(struct r2p2_server_pair *sp);
@@ -204,6 +238,26 @@ int prepare_to_send(struct r2p2_client_pair *cp);
 int buf_list_send(generic_buffer first_buf, struct r2p2_host_tuple *dest,
 				  void *socket_info);
 int disarm_timer(void *timer);
+
+int cp_restart_timer(struct r2p2_client_pair *cp, long timeout);
+
+void sp_get_timer(struct r2p2_server_pair *sp);
+int sp_restart_timer(struct r2p2_server_pair *sp, long timeout);
+void sp_free_timer(struct r2p2_server_pair *sp);
+
+/*
+ * Exactly Once specific
+ */
+static inline int is_exct_once(struct r2p2_ctx *ctx)
+{
+  return (ctx->routing_policy & EXCT_ONCE_FLAG) != 0;
+}
+
+void eo_send_ack(struct r2p2_client_pair *cp);
+void eo_handle_ack(generic_buffer gb, int len, struct r2p2_header *r2p2h,
+                   struct r2p2_host_tuple *source);
+int eo_try_garbage_collect(struct r2p2_server_pair *sp);
+
 void router_notify(uint32_t ip, uint16_t port, uint16_t rid);
 static inline void r2p2_prepare_feedback(char *dest, uint32_t ip,
 		uint16_t port, uint16_t rid)

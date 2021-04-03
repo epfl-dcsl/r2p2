@@ -33,6 +33,8 @@
 #define BUFLEN 2048 //(PAYLOAD_SIZE + sizeof(struct r2p2_header) + sizeof(struct
 					// linux_buf_hdr)) half a page
 
+#define TIMERPOOL_SIZE 128
+
 struct __attribute__((packed)) linux_buf_hdr {
 	uint32_t payload_size;
 	struct linux_buf_hdr *next;
@@ -53,4 +55,17 @@ struct socket_pool {
 	uint32_t count;
 	uint32_t idx;
 	struct r2p2_socket sockets[SOCKPOOL_SIZE];
+};
+
+// Used for server pairs
+struct loose_timer {
+	int fd;
+	int taken;
+	void *data;
+};
+
+struct timer_pool {
+	uint32_t count;
+	uint32_t idx;
+	struct loose_timer timers[TIMERPOOL_SIZE];
 };

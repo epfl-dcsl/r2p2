@@ -54,7 +54,7 @@ enum {
 struct __attribute__((packed)) r2p2_ctx {
 	success_cb_f success_cb;
 	error_cb_f error_cb;
-	timeout_cb_f timeout_cb;
+	timeout_cb_f timeout_cb; // with EO, triggered only in case of failure, i.e. after enough timeouts
 	void *arg;
 	long timeout;
 	int routing_policy;
@@ -81,3 +81,5 @@ void r2p2_set_app_flow_control_fn(app_flow_control fn);
 void r2p2_send_req(struct iovec *iov, int iovcnt, struct r2p2_ctx *ctx);
 void r2p2_send_response(long handle, struct iovec *iov, int iovcnt);
 void r2p2_recv_resp_done(long handle);
+
+void use_exct_once(struct r2p2_ctx *ctx);
